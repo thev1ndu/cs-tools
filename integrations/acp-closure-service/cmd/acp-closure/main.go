@@ -76,13 +76,17 @@ func main() {
 		os.Exit(0)
 	}
 
-	entityClient := entity.NewClient(entity.Config{
+	entityClient, err := entity.NewClient(entity.Config{
 		BaseURL:      mustEnv("CSM_INTEGRATION_BASE_URL"),
 		TokenURL:     mustEnv("CSM_INTEGRATION_TOKEN_URL"),
 		ClientID:     mustEnv("CSM_INTEGRATION_CLIENT_ID"),
 		ClientSecret: mustEnv("CSM_INTEGRATION_CLIENT_SECRET"),
 		Scopes:       strings.Fields(mustEnv("CSM_INTEGRATION_SCOPES")),
 	})
+	if err != nil {
+		slog.Error("invalid csm-integration-service configuration", "err", err)
+		os.Exit(1)
+	}
 
 	var updater projectUpdater = entityClient
 	if dryRun {

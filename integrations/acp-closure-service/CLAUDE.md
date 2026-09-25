@@ -488,14 +488,29 @@ wrong answer:
   testing against real data shows this role is rarely configured in
   practice regardless — most real resolutions land on `primary_contact` or
   `am_nudge`, not `business_contact`.
-- **`internal/entity.Client` doesn't validate its configured URLs use
-  `https`** — the same gap `internal/emailservice.Client.NewClient` was
-  given a fix for (per CodeRabbit; see `requireHTTPS` there). Deliberately
-  not fixed here — scoped out to keep that change focused on the email code
-  it was actually about. `entity.Client` carries
-  the same category of risk (its `ClientSecret` flows through the same
-  kind of token request) and should get the equivalent check in its own
-  follow-up.
+
+## Both HTTP clients share one set of transport guards
+
+`internal/entity` and `internal/emailservice` both build their OAuth2
+client through `internal/httpsec`, and must keep doing so:
+
+- `httpsec.RequireHTTPS` makes `NewClient` refuse a non-https `TokenURL` or
+  `BaseURL`, and one with no host (a bare `https://` parses cleanly and
+  would otherwise only fail on the first request; CodeRabbit, PR #2008).
+  Loopback is exempt, since `httptest` servers bind there. The
+  token request carries the real client secret, and every API call carries
+  the bearer token and real customer data.
+- `httpsec.RefuseRedirects` goes on **both** the token client (the one in
+  `tokenCtx`, which POSTs the secret) **and** the API client (where
+  `oauth2.Transport` would re-attach the bearer token to a followed
+  redirect). Guarding only the API client leaves the secret exposed; this
+  exact mistake happened once in the email client.
+
+These checks were first added to the email client alone (CodeRabbit, PR
+#1657). The entity client went without them until they were moved into the
+shared package, which is why they live in one place now. If you add a third
+HTTP client, build it the same way. `TestTokenFetchRejectsRedirects` in each
+client package was confirmed to fail with the token-client guard removed.
 
 ## Real email sending
 
