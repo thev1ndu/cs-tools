@@ -16,7 +16,12 @@
 
 package service
 
-import "regexp"
+import "strings"
+
+const (
+	codeBlockOpen  = "[code]"
+	codeBlockClose = "[/code]"
+)
 
 // ServiceNow HTML-escapes anything written to a work_notes/comments journal
 // field by default, unless the value is wrapped in "[code]"/"[/code]" -- its
@@ -26,10 +31,17 @@ import "regexp"
 // internal/servicenow/worknotes.go); incident work notes/comments need the
 // same wrap, since they go HTML-sourced but through this service's Choreo
 // ServiceNow integration instead.
-var (
-	codeBlockOpenRe  = regexp.MustCompile(`\[code\]`)
-	codeBlockCloseRe = regexp.MustCompile(`\[/code\]`)
-)
+//
+// wrapCodeBlock/trimCodeBlock only add/remove this service's own outermost
+// wrapper (added exactly once, by wrapCodeBlock itself, around the whole
+// value) -- they must never touch a "[code]"/"[/code]" substring the caller's
+// own content legitimately contains, e.g. a note that mentions "[code]" in
+// its text.
+//
+// Both only ever see content this portal's own rich-text editor produced
+// (every caller threads it through as "bodyHtml" -- see e.g.
+// useCsmIncidentComments.ts/useCsmChangeRequestComments.ts), so it is already
+// HTML; this does not escape plain text before wrapping it.
 
 // wrapCodeBlock marks an HTML-sourced work note/comment so ServiceNow renders
 // it instead of displaying the tags literally. nil is passed through as nil.
@@ -37,18 +49,22 @@ func wrapCodeBlock(value *string) *string {
 	if value == nil {
 		return nil
 	}
-	wrapped := "[code]" + *value + "[/code]"
+	wrapped := codeBlockOpen + *value + codeBlockClose
 	return &wrapped
 }
 
-// trimCodeBlock strips ServiceNow's "[code]"/"[/code]" wrapper markers from a
-// work note/comment read back from ServiceNow -- mirrors
-// apps/csm-portal/backend/internal/servicenow/cases.go's trimCodeBlock.
-// nil is passed through as nil.
+// trimCodeBlock strips wrapCodeBlock's own leading "[code]"/trailing
+// "[/code]" markers from a work note/comment read back from ServiceNow --
+// only when both are present at the respective boundary (i.e. this is really
+// wrapCodeBlock's own wrapper), so an unpaired or interior "[code]"/"[/code]"
+// elsewhere in the content is left untouched. nil is passed through as nil.
 func trimCodeBlock(value *string) *string {
 	if value == nil {
 		return nil
 	}
-	trimmed := codeBlockCloseRe.ReplaceAllString(codeBlockOpenRe.ReplaceAllString(*value, ""), "")
+	trimmed := *value
+	if strings.HasPrefix(trimmed, codeBlockOpen) && strings.HasSuffix(trimmed, codeBlockClose) {
+		trimmed = strings.TrimSuffix(strings.TrimPrefix(trimmed, codeBlockOpen), codeBlockClose)
+	}
 	return &trimmed
 }
