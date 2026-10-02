@@ -28,8 +28,8 @@ import (
 	"testing"
 	"time"
 
-	"sre-alert-ingestion-service/internal/auth"
-	"sre-alert-ingestion-service/internal/server"
+	"sre-alert-ingestion-service/internal/transport/auth"
+	"sre-alert-ingestion-service/internal/transport/server"
 )
 
 // blockingPipeline holds each request until release is closed.
@@ -81,7 +81,7 @@ func startInFlight(t *testing.T, pipe *blockingPipeline) (*server.Server, *http.
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := server.New(server.Options{
-		Logger: logger, Auth: auth.None{}, Pipeline: pipe, Vendors: []string{"aws"},
+		Logger: logger, Auth: auth.None{}, Pipeline: pipe, Sources: []string{"aws"},
 		MaxBodyBytes: 1 << 20, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second,
 	})
 	httpSrv := srv.HTTPServer("")
@@ -93,7 +93,7 @@ func startInFlight(t *testing.T, pipe *blockingPipeline) (*server.Server, *http.
 
 	status := make(chan int, 1)
 	go func() {
-		resp, err := http.Post("http://"+ln.Addr().String()+server.VendorRoutePrefix+"aws", "application/json", strings.NewReader(`{}`))
+		resp, err := http.Post("http://"+ln.Addr().String()+server.SourceRoutePrefix+"aws", "application/json", strings.NewReader(`{}`))
 		if err != nil {
 			status <- 0
 			return
