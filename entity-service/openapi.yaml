@@ -3537,7 +3537,7 @@ paths:
 
   /services/search:
     post:
-      summary: Search CMDB IT services (ServiceNow data source only).
+      summary: Search CMDB IT services.
       operationId: searchITServices
       requestBody:
         required: true
@@ -11874,7 +11874,22 @@ components:
       properties:
         searchQuery:
           type: string
-          description: Free-text search query.
+          description: |
+            Free-text search query, matched against the service name (and, on the
+            PostgreSQL data source, its number). Leading and trailing whitespace is
+            ignored.
+
+            With a query, results are ranked best match first: the exact name, then
+            a name that starts with the query, then a name with a word that starts
+            with it, then any other match; on the ServiceNow data source a service
+            ranks ahead of a service offering within each of those. Equally ranked
+            services keep the order of the underlying source (newest first). Without
+            a query the order is that of the underlying source.
+
+            On the ServiceNow data source the ranking covers the first 250 matches;
+            a page that starts past them continues in the source's own order, and the
+            page that crosses the 250th match is completed from the rows after it, so
+            pages are always full. A whitespace-only query is the same as no query.
 
     SearchITServicesRequest:
       type: object

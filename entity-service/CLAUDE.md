@@ -682,3 +682,50 @@ Missing a `sysidToUUID()` call on a response ID means callers receive a bare sys
 
 - **Security fixes in PRs** — when a change is made to fix a security issue (gosec findings, input sanitization, etc.), do not mention it in the PR title or description; describe the change in neutral functional terms only
 - **Run govulncheck on every change** — `govulncheck ./...` (install once: `go install golang.org/x/vuln/cmd/govulncheck@latest`) must report no vulnerabilities before opening a PR. Most findings here are Go standard-library CVEs tied to the toolchain patch version pinned in `go.mod`'s `go` directive — bump it to the latest `1.26.x` patch (and run `go mod tidy` so the toolchain download matches) rather than working around the symptom. A finding in a third-party module (e.g. `golang.org/x/text`, pulled in transitively via `pgx`) is fixed with `go get <module>@<fixed-version>`
+
+### Searching services: ranked, not newest-first (the "Choreo" incident)
+
+`POST /services/search` used to return the newest `limit` matches of a name substring
+(ServiceNow's own creation order, 50 per page). The CSM portal's Create Incident "Service" picker shows
+20, so a service whose name is also the prefix of many newer records could not be
+picked. Found on production (digiops-cs#3338): searching "Choreo" matches 55 records,
+45 of them `service_offering` rows ("Choreo EU - DP ... Service Offering"), and the
+plain **Choreo** service (`cmdb_ci_service`, support group Artemis SRE Group) is the
+55th. An incident raised against an offering has no support group, so it was never
+assigned to the SRE group and the Choreo alerts never fired.
+
+With a non-empty query the results are now ranked: exact name, then name prefix, then a
+word of the name starts with it, then anywhere (`itServiceMatchTier`); within a tier
+services come before service offerings, and equal ranks keep the
+source's order. Matching is case-insensitive and ignores runs of whitespace (one real offering is spelled "Choreo  EU" with two spaces). The query is trimmed before it goes anywhere, so a whitespace-only query
+is an empty one and lists everything.
+
+- **ServiceNow** (`sn_it_service_service.go`): the upstream only does `name CONTAINS`,
+  so ranking needs the matches. `fetchITServiceRankWindow` fetches page 0 (50, the
+  upstream's ceiling), reads `totalRecords` and fetches the rest concurrently, up to
+  `snITServiceRankPages` (5) pages = 250 matches, ranks that window and cuts the
+  requested page from it. `Total` stays the upstream's count. A query with more than 250
+  matches is ranked among the first 250; narrow it by typing more.
+- **Passed through unranked:** an empty query (nothing to rank by) and a page whose
+  `offset` is at or past the window. The window is exactly the upstream's first 250
+  matches, so a caller that walks the result page by page (`sre-alert-core-service`'s
+  `SearchService` resolves a label that way) continues where the window ends with nothing
+  skipped or repeated (`..._WalkingPastTheRankedWindowStillReachesEveryMatch`). The one page that
+  crosses the window's end is completed from the upstream rows right after it (one more call), so
+  every page is full and a caller that steps by its page size, whatever it is, reaches every match
+  once (`..._FixedStrideWalkReachesEveryMatchForAnyPageSize`; a short straddling page lost rows for
+  page sizes that do not divide 250).
+- **Cost:** a searched page is up to 5 upstream calls (2 for a query with 51-100 matches,
+  1 for fewer), the later ones in parallel, instead of 1; 6 for the page that crosses the
+  window's end. A caller that walks a many-match query page by page pays that per page, so a
+  walk for a label with no exact match costs several times what it did (about 26 calls for
+  300 matches, against 6); a label that exists is found on its first page. An upstream failure
+  on any page fails the search rather than returning a partly ranked list. The pages are
+  fetched at slightly different moments, so a record created in between could repeat the row at
+  a seam; the window is deduplicated by id, and a page that leaves short (the window then
+  holds 249 of its 250 rows) is filled from the rows right after the window like the page
+  that crosses its end, never asking the upstream for more than its page ceiling of 50.
+
+Tests: `sn_it_service_service_test.go` (a fake upstream shaped like production, with
+the 55 "Choreo" matches).
+
