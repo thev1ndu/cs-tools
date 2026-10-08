@@ -116,7 +116,10 @@ func DedupTag(fingerprint string, firstSeen time.Time) string {
 // NotifyCSM returns permanent=true for non-retryable rejections (non-429 4xx). CSMAttempts >= 1 already counts current attempt; only first attempts fail open on search errors.
 func (n *Notifier) NotifyCSM(ctx context.Context, inc model.Incident, creationNote string) (incidentID, incidentNumber string, ok bool, permanent bool) {
 	tag := DedupTag(inc.Fingerprint, inc.FirstSeen)
-	if id, number, found, err := n.csm.SearchIncidentByCorrelationID(ctx, tag); err != nil {
+	if id, number, found, err := n.csm.SearchIncidentByCorrelationID(ctx, tag); errors.Is(err, csm.ErrCorrelationFilterIgnored) {
+		// Dedup is impossible against this backend; deferring would never create the incident, so a rare duplicate is the lesser harm.
+		n.logger.Warn("csm dedup unavailable, correlationId filter not applied, proceeding to create", "incident_number", inc.IncidentNumber, "error", err)
+	} else if err != nil {
 		if inc.CSMAttempts > 1 {
 			n.logger.Warn("csm dedup search failed on retry, deferring to avoid a duplicate create", "incident_number", inc.IncidentNumber, "error", err)
 			return "", "", false, false
@@ -172,7 +175,7 @@ func (n *Notifier) createIncidentWithRetry(ctx context.Context, tag string, req 
 		if attempt > 1 {
 			// Recheck dedup on retry: prior attempt may have succeeded but lost response; CreateIncident isn't idempotent.
 			id, number, found, err := n.csm.SearchIncidentByCorrelationID(ctx, tag)
-			if err != nil {
+			if err != nil && !errors.Is(err, csm.ErrCorrelationFilterIgnored) {
 				return nil, fmt.Errorf("dedup search before retry: %w", err)
 			}
 			if found {

@@ -51,6 +51,8 @@ type fakeCSM struct {
 	creates []map[string]any
 	// failServiceSearch makes /services/search answer 500, as a CSM outage would.
 	failServiceSearch bool
+	// ignoreCorrelationFilter makes /incidents/search return unrelated incidents, as main's ServiceNow search does.
+	ignoreCorrelationFilter bool
 }
 
 func (f *fakeCSM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +76,13 @@ func (f *fakeCSM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = io.WriteString(w, `{"services":[],"total":0}`)
 	case "/incidents/search":
+		f.mu.Lock()
+		ignore := f.ignoreCorrelationFilter
+		f.mu.Unlock()
+		if ignore {
+			_, _ = io.WriteString(w, `{"incidents":[{"id":"old-1","number":"INC0040603"},{"id":"old-2","number":"INC0054727"}],"total":88254}`)
+			return
+		}
 		_, _ = io.WriteString(w, `{"incidents":[],"total":0}`)
 	case "/incidents":
 		var req map[string]any
@@ -191,5 +200,24 @@ func TestNotifyCSM_ServiceSearchErrorRetriesWithoutFallingBack(t *testing.T) {
 	}
 	if len(fake.creates) != 1 || fake.creates[0]["serviceId"] != "svc-choreo" {
 		t.Errorf("retry created %v, want one incident against svc-choreo", fake.creates)
+	}
+}
+
+// A backend that ignores the correlationId filter makes dedup impossible: the retry still creates its own
+// incident instead of deferring forever or reusing an unrelated one.
+func TestNotifyCSM_IgnoredCorrelationFilterStillCreatesOnRetry(t *testing.T) {
+	fake := &fakeCSM{ignoreCorrelationFilter: true}
+	n := newFakeCSMNotifier(t, fake)
+	inc := model.Incident{
+		IncidentNumber: "1", Fingerprint: "0123456789abcdef", FirstSeen: time.Now(),
+		Service: "choreo-control-plane", Source: "AWS", Impact: "HIGH", Urgency: "HIGH", CSMAttempts: 2,
+	}
+
+	_, number, ok, _ := n.NotifyCSM(context.Background(), inc, "")
+	if !ok || number != "INC0010001" {
+		t.Fatalf("NotifyCSM = number %q, ok %v; want the newly created INC0010001", number, ok)
+	}
+	if len(fake.creates) != 1 {
+		t.Errorf("%d creates reached CSM, want 1", len(fake.creates))
 	}
 }

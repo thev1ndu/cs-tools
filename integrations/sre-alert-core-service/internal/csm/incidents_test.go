@@ -19,6 +19,7 @@ package csm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -102,8 +103,8 @@ func TestSearchIncidentByCorrelationID_SeveralMatchesAreAnError(t *testing.T) {
 			client, _ := newSearchTestClient(t, resp)
 
 			_, number, found, err := client.SearchIncidentByCorrelationID(context.Background(), testTag)
-			if err == nil || found {
-				t.Fatalf("number=%q found=%v err=%v; want an error, not a reused incident", number, found, err)
+			if !errors.Is(err, ErrCorrelationFilterIgnored) || found {
+				t.Fatalf("number=%q found=%v err=%v; want ErrCorrelationFilterIgnored, not a reused incident", number, found, err)
 			}
 		})
 	}
