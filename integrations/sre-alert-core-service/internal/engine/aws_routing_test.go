@@ -45,14 +45,14 @@ var awsStoredAlerts = map[string]string{
 }
 
 // fakeCSM is csm-integration-service as alert-core sees it: an OAuth2 token endpoint, the CMDB
-// service search, the dedup search, and the incident create, whose request bodies it keeps.
+// service search, the incident search, and the incident create, whose request bodies it keeps.
 type fakeCSM struct {
 	mu      sync.Mutex
 	creates []map[string]any
 	// failServiceSearch makes /services/search answer 500, as a CSM outage would.
 	failServiceSearch bool
-	// ignoreCorrelationFilter makes /incidents/search return unrelated incidents, as main's ServiceNow search does.
-	ignoreCorrelationFilter bool
+	// incidentSearches counts /incidents/search calls.
+	incidentSearches int
 }
 
 func (f *fakeCSM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -77,12 +77,8 @@ func (f *fakeCSM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"services":[],"total":0}`)
 	case "/incidents/search":
 		f.mu.Lock()
-		ignore := f.ignoreCorrelationFilter
+		f.incidentSearches++
 		f.mu.Unlock()
-		if ignore {
-			_, _ = io.WriteString(w, `{"incidents":[{"id":"old-1","number":"INC0040603"},{"id":"old-2","number":"INC0054727"}],"total":88254}`)
-			return
-		}
 		_, _ = io.WriteString(w, `{"incidents":[],"total":0}`)
 	case "/incidents":
 		var req map[string]any
@@ -203,10 +199,10 @@ func TestNotifyCSM_ServiceSearchErrorRetriesWithoutFallingBack(t *testing.T) {
 	}
 }
 
-// A backend that ignores the correlationId filter makes dedup impossible: the retry still creates its own
-// incident instead of deferring forever or reusing an unrelated one.
-func TestNotifyCSM_IgnoredCorrelationFilterStillCreatesOnRetry(t *testing.T) {
-	fake := &fakeCSM{ignoreCorrelationFilter: true}
+// A retry creates its incident straight away: CSM is not searched for a prior create, so an unrelated
+// incident is never reused and a search that ignores its filter can no longer block the create.
+func TestNotifyCSM_RetryCreatesWithoutSearching(t *testing.T) {
+	fake := &fakeCSM{}
 	n := newFakeCSMNotifier(t, fake)
 	inc := model.Incident{
 		IncidentNumber: "1", Fingerprint: "0123456789abcdef", FirstSeen: time.Now(),
@@ -217,7 +213,10 @@ func TestNotifyCSM_IgnoredCorrelationFilterStillCreatesOnRetry(t *testing.T) {
 	if !ok || number != "INC0010001" {
 		t.Fatalf("NotifyCSM = number %q, ok %v; want the newly created INC0010001", number, ok)
 	}
-	if len(fake.creates) != 1 {
-		t.Errorf("%d creates reached CSM, want 1", len(fake.creates))
+	if len(fake.creates) != 1 || fake.incidentSearches != 0 {
+		t.Errorf("creates %d, incident searches %d; want 1 create and no search", len(fake.creates), fake.incidentSearches)
+	}
+	if fake.creates[0]["correlationId"] != notify.CorrelationTag(inc.Fingerprint, inc.FirstSeen) {
+		t.Errorf("correlationId = %v, want the incident's correlation tag", fake.creates[0]["correlationId"])
 	}
 }

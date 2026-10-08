@@ -108,38 +108,22 @@ func (n *Notifier) CSMEnabled() bool {
 	return n.csm != nil
 }
 
-// DedupTag includes FirstSeen for uniqueness; millisecond precision ensures same-second recurrences get distinct tags.
-func DedupTag(fingerprint string, firstSeen time.Time) string {
+// CorrelationTag includes FirstSeen for uniqueness; millisecond precision ensures same-second recurrences get distinct tags.
+func CorrelationTag(fingerprint string, firstSeen time.Time) string {
 	return fmt.Sprintf("[fp:%s:%d]", fingerprint[:12], firstSeen.UnixMilli())
 }
 
-// NotifyCSM returns permanent=true for non-retryable rejections (non-429 4xx). CSMAttempts >= 1 already counts current attempt; only first attempts fail open on search errors.
+// NotifyCSM returns permanent=true for non-retryable rejections (non-429 4xx); it never searches CSM for a prior create, so a lost create response means a second create on retry.
 func (n *Notifier) NotifyCSM(ctx context.Context, inc model.Incident, creationNote string) (incidentID, incidentNumber string, ok bool, permanent bool) {
-	tag := DedupTag(inc.Fingerprint, inc.FirstSeen)
-	if id, number, found, err := n.csm.SearchIncidentByCorrelationID(ctx, tag); errors.Is(err, csm.ErrCorrelationFilterIgnored) {
-		// Dedup is impossible against this backend; deferring would never create the incident, so a rare duplicate is the lesser harm.
-		n.logger.Warn("csm dedup unavailable, correlationId filter not applied, proceeding to create", "incident_number", inc.IncidentNumber, "error", err)
-	} else if err != nil {
-		if inc.CSMAttempts > 1 {
-			n.logger.Warn("csm dedup search failed on retry, deferring to avoid a duplicate create", "incident_number", inc.IncidentNumber, "error", err)
-			return "", "", false, false
-		}
-		// Fail open: first attempt, so no prior create possible; search error doesn't prove no incident exists.
-		n.logger.Warn("csm dedup search failed, proceeding to create", "incident_number", inc.IncidentNumber, "error", err)
-	} else if found {
-		n.logger.Info("found existing csm incident via dedup search, reusing", "incident_id", id, "incident_number", number)
-		return id, number, true, false
-	}
-
 	svc, err := n.resolveService(ctx, inc.Service)
 	if err != nil {
 		n.logger.Error("service id resolution failed, will retry", "incident_number", inc.IncidentNumber, "service", inc.Service, "error", err)
 		return "", "", false, false
 	}
 
-	req := n.createRequest(inc, svc, tag, creationNote)
+	req := n.createRequest(inc, svc, CorrelationTag(inc.Fingerprint, inc.FirstSeen), creationNote)
 
-	res, err := n.createIncidentWithRetry(ctx, tag, req)
+	res, err := n.createIncidentWithRetry(ctx, req)
 	if err != nil {
 		var apiErr *csm.Error
 		perm := errors.As(err, &apiErr) && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 && apiErr.StatusCode != http.StatusTooManyRequests
@@ -164,25 +148,12 @@ func (n *Notifier) IncidentState(ctx context.Context, incidentNumber string) (op
 	return n.csm.IncidentState(ctx, incidentNumber)
 }
 
-// createIncidentWithRetry re-checks dedup on each retry, since a lost response could mean CSM already created it.
-func (n *Notifier) createIncidentWithRetry(ctx context.Context, tag string, req csm.CreateIncidentRequest) (*csm.CreateIncidentResult, error) {
+// createIncidentWithRetry retries transient CreateIncident failures with backoff; 4xx other than 429 is permanent.
+func (n *Notifier) createIncidentWithRetry(ctx context.Context, req csm.CreateIncidentRequest) (*csm.CreateIncidentResult, error) {
 	eb := backoff.NewExponentialBackOff()
 	eb.InitialInterval = n.retryBaseDelay
 
-	attempt := 0
 	return backoff.Retry(ctx, func() (*csm.CreateIncidentResult, error) {
-		attempt++
-		if attempt > 1 {
-			// Recheck dedup on retry: prior attempt may have succeeded but lost response; CreateIncident isn't idempotent.
-			id, number, found, err := n.csm.SearchIncidentByCorrelationID(ctx, tag)
-			if err != nil && !errors.Is(err, csm.ErrCorrelationFilterIgnored) {
-				return nil, fmt.Errorf("dedup search before retry: %w", err)
-			}
-			if found {
-				n.logger.Info("found existing csm incident via dedup search on retry, reusing", "incident_id", id, "incident_number", number)
-				return &csm.CreateIncidentResult{IncidentID: id, IncidentNumber: number}, nil
-			}
-		}
 		res, err := n.csm.CreateIncident(ctx, req)
 		if err == nil {
 			return res, nil
@@ -301,7 +272,7 @@ func csmCategory(category string) string {
 	return "SERVICE_INTERRUPTION"
 }
 
-// incidentSubject is the metric name alone; the dedup tag and other alert context live in WorkNotes instead of the title.
+// incidentSubject is the metric name alone; the correlation tag and other alert context live outside the title.
 func incidentSubject(inc model.Incident) string {
 	subject := inc.MetricName
 	if subject == "" {

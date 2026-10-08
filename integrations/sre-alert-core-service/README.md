@@ -88,9 +88,9 @@ two replicas never claim the same alert row, and a crashed replica's claims beco
 reclaimable after `poll.claim_ttl`. If two replicas do hold alerts for the same
 fingerprint, the transaction-scoped fold lock serializes them, so the outcome is
 the same as one replica processing both. Delivery is serialized per incident by a
-session advisory try-lock (`internal/pglock`), and CSM's dedup-by-tag search covers
-the remaining gap where a replica crashes between a CSM create succeeding and its
-confirmation being stored.
+session advisory try-lock (`internal/pglock`). CSM is not searched for a prior
+create, so if a replica crashes, or a create response is lost, between a CSM create
+succeeding and its confirmation being stored, the retry creates a second CSM incident.
 
 ## Package layout
 

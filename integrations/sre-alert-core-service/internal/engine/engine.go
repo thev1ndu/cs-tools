@@ -366,7 +366,7 @@ func (d *delivery) createInCSM() {
 		}
 		return
 	}
-	// If this write fails, the next attempt's dedup-by-tag search finds the CSM incident instead of duplicating it.
+	// If this write fails, the next attempt creates the CSM incident again: CSM is not searched for a prior create.
 	if !d.persist("csm confirmation", func(c context.Context) error {
 		return e.incidents.RecordCSMIncident(c, d.inc.ID, csmID, number)
 	}) {
