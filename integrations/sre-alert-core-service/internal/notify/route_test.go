@@ -42,6 +42,9 @@ func TestCreateRequest_CarriesServiceAndContactTypeButNoGroup(t *testing.T) {
 	if got["serviceId"] != "svc-id" {
 		t.Errorf("serviceId = %v, want svc-id", got["serviceId"])
 	}
+	if want := "[code]Incident auto-created from Alert: ALT1[/code]"; got["workNotes"] != want {
+		t.Errorf("workNotes = %v, want %q", got["workNotes"], want)
+	}
 }
 
 // AWS (and any source the contact-type enum has no value for) sends no contactType rather than a wrong one.

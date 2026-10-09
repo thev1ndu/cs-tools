@@ -140,7 +140,12 @@ func (n *Notifier) PushWorkNote(ctx context.Context, incidentID, note string) er
 	if incidentID == "" {
 		return fmt.Errorf("notify: cannot push work note, incident has no csm incident id yet")
 	}
-	return n.csm.UpdateIncident(ctx, incidentID, note)
+	return n.csm.UpdateIncident(ctx, incidentID, csmWorkNote(note))
+}
+
+// csmWorkNote wraps an HTML note in ServiceNow's [code] markers; without them ServiceNow escapes the markup and it shows as raw tags.
+func csmWorkNote(note string) string {
+	return "[code]" + note + "[/code]"
 }
 
 // IncidentState returns found=false when CSM has no matching incident yet.
@@ -185,7 +190,8 @@ func (n *Notifier) createRequest(inc model.Incident, svc resolvedService, tag, c
 		CorrelationID: &tag,
 	}
 	if creationNote != "" {
-		req.WorkNotes = &creationNote
+		note := csmWorkNote(creationNote)
+		req.WorkNotes = &note
 	}
 	if ct := contactTypeForSource(inc.Source); ct != "" {
 		req.ContactType = &ct
