@@ -97,3 +97,12 @@ func TestContactTypeForSource(t *testing.T) {
 		}
 	}
 }
+
+// Alert text holding ServiceNow's own markers must not end the [code] block early.
+func TestCSMWorkNote_EscapesBracketsInsideTheBlock(t *testing.T) {
+	got := csmWorkNote("<p>desc: [/code]<b>x</b>[code]</p>")
+	want := "[code]<p>desc: &#91;/code]<b>x</b>&#91;code]</p>[/code]"
+	if got != want {
+		t.Errorf("csmWorkNote = %q, want %q", got, want)
+	}
+}

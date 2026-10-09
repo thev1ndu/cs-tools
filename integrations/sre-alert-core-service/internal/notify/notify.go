@@ -143,9 +143,10 @@ func (n *Notifier) PushWorkNote(ctx context.Context, incidentID, note string) er
 	return n.csm.UpdateIncident(ctx, incidentID, csmWorkNote(note))
 }
 
-// csmWorkNote wraps an HTML note in ServiceNow's [code] markers; without them ServiceNow escapes the markup and it shows as raw tags.
+// csmWorkNote wraps an HTML note in ServiceNow's [code] markers, as the portal's own work notes are; without them ServiceNow escapes the markup.
+// Every "[" in the note becomes &#91; so alert text holding [code] or [/code] cannot end the block early; it still renders as "[".
 func csmWorkNote(note string) string {
-	return "[code]" + note + "[/code]"
+	return "[code]" + strings.ReplaceAll(note, "[", "&#91;") + "[/code]"
 }
 
 // IncidentState returns found=false when CSM has no matching incident yet.
