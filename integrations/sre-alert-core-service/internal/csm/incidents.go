@@ -38,6 +38,8 @@ type CreateIncidentRequest struct {
 	ContactType *string `json:"contactType,omitempty"`
 	// CorrelationID tags the incident with its fingerprint generation on ServiceNow's correlation_id field, for tracing it back to alert-core.
 	CorrelationID *string `json:"correlationId,omitempty"`
+	// Environment is the alert's environment label (e.g. "central"), shown on the incident and its Chat card.
+	Environment *string `json:"environment,omitempty"`
 }
 
 // createdIncident is the subset of the response's nested "incident" object this service actually reads.

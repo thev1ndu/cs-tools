@@ -32,6 +32,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cenkalti/backoff/v5"
 	"golang.org/x/sync/singleflight"
@@ -190,7 +191,22 @@ func (n *Notifier) createRequest(inc model.Incident, svc resolvedService, tag, c
 	if ct := contactTypeForSource(inc.Source); ct != "" {
 		req.ContactType = &ct
 	}
+	if env := incidentEnvironment(inc.Environment); env != "" {
+		req.Environment = &env
+	}
 	return req
+}
+
+// maxIncidentEnvironmentLength is entity-service's limit; a longer value would be rejected for good, so it is not sent.
+const maxIncidentEnvironmentLength = 40
+
+// incidentEnvironment is the environment to send with the incident, or "" when there is none or it is too long.
+func incidentEnvironment(environment string) string {
+	env := strings.TrimSpace(environment)
+	if utf8.RuneCountInString(env) > maxIncidentEnvironmentLength {
+		return ""
+	}
+	return env
 }
 
 // contactTypes maps an alert's Source (normalised by normaliseSource) to entity-service's IncidentContactType.

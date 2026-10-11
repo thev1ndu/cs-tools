@@ -19,6 +19,7 @@ package notify
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,5 +93,27 @@ func TestContactTypeForSource(t *testing.T) {
 		if got := contactTypeForSource(source); got != want {
 			t.Errorf("contactTypeForSource(%q) = %q, want %q", source, got, want)
 		}
+	}
+}
+
+// The alert's environment rides on the incident so the CSM record and its Chat card show it.
+func TestCreateRequest_CarriesTheEnvironment(t *testing.T) {
+	n := &Notifier{callerID: "caller"}
+	cases := map[string]struct {
+		env  string
+		want any
+	}{
+		"set":          {" central ", "central"},
+		"empty":        {"", nil},
+		"too long":     {strings.Repeat("x", 41), nil},
+		"at the limit": {strings.Repeat("y", 40), strings.Repeat("y", 40)},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := createBody(t, n.createRequest(model.Incident{Fingerprint: "fp", Environment: c.env}, resolvedService{id: "svc-id"}, "[fp:tag]", ""))
+			if v, present := got["environment"]; c.want == nil && present || c.want != nil && v != c.want {
+				t.Errorf("environment = %v (present %v), want %v", v, present, c.want)
+			}
+		})
 	}
 }
