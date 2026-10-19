@@ -45,17 +45,16 @@ func TestRunbookNote(t *testing.T) {
 		Subject: "[Alert]Fired:Sev0 Azure Monitor Alert EXAMPLE-gw-CriticalHTTP5xxCountLimitExceeded-prod-001 on log-002"})
 	for _, want := range []string{
 		"<table style='border:1px solid #dcdcdc; border-collapse:collapse;",
-		">Alert</th><th style=",
 		">Runbook</th></tr>",
-		">example-gw-CriticalHTTP5xxCountLimitExceeded-prod-001</td>",
 		`<a href="https://docs.example.com/gw-5xx" target="_blank" rel="noopener noreferrer">https://docs.example.com/gw-5xx</a></td></tr></table>`,
 	} {
 		if !strings.Contains(linked, want) {
 			t.Fatalf("linked note %q does not contain %q", linked, want)
 		}
 	}
-	if !strings.HasPrefix(linked, "<table") || strings.Contains(linked, "[code]") || strings.Contains(linked, "alert_name") {
-		t.Fatalf("note must be the Alert | Runbook table alone: %q", linked)
+	if !strings.HasPrefix(linked, "<table") || strings.Contains(linked, "[code]") || strings.Contains(linked, "Alert</th>") ||
+		strings.Contains(linked, "example-gw-CriticalHTTP5xxCountLimitExceeded-prod-001") {
+		t.Fatalf("note must be the Runbook table alone, with no alert column: %q", linked)
 	}
 
 	short := runbookNote(testRunbooks, domain.CreateIncidentRequest{Subject: "example-gw-CriticalHTTP5xx spike"})
@@ -64,7 +63,7 @@ func TestRunbookNote(t *testing.T) {
 	}
 
 	unlinked := runbookNote(testRunbooks, domain.CreateIncidentRequest{Subject: "Icinga Alert: demo-node-01 / JVM Heap"})
-	if !strings.Contains(unlinked, ">Icinga Alert: demo-node-01 / JVM Heap</td>") || !strings.Contains(unlinked, ">"+noRunbookNoteText+"</td>") {
+	if !strings.Contains(unlinked, ">Runbook</th></tr>") || !strings.Contains(unlinked, ">"+noRunbookNoteText+"</td>") || strings.Contains(unlinked, "JVM Heap") {
 		t.Fatalf("unlinked note = %q", unlinked)
 	}
 

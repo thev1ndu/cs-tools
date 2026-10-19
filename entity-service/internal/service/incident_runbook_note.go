@@ -63,7 +63,7 @@ func runbookNote(runbooks []domain.Runbook, req domain.CreateIncidentRequest) st
 			link := html.EscapeString(strings.TrimSpace(*rb.RunbookURL))
 			runbook = `<a href="` + link + `" target="_blank" rel="noopener noreferrer">` + link + `</a>`
 		}
-		return runbookNoteTable(html.EscapeString(rb.AlertName), runbook)
+		return runbookNoteTable(runbook)
 	}
 	if req.CorrelationID != nil && strings.TrimSpace(*req.CorrelationID) != "" {
 		return "<p>" + noRunbookNoteText + "</p>"
@@ -71,12 +71,12 @@ func runbookNote(runbooks []domain.Runbook, req domain.CreateIncidentRequest) st
 	return ""
 }
 
-// runbookNoteTable renders the already-escaped alert name and runbook cell under an Alert | Runbook header row.
-func runbookNoteTable(alert, runbook string) string {
+// runbookNoteTable renders the already-escaped runbook cell under a Runbook header row.
+func runbookNoteTable(runbook string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<table style='%s'>", runbookNoteTableStyle)
-	fmt.Fprintf(&b, "<tr><th style='%s'>Alert</th><th style='%s'>Runbook</th></tr>", runbookNoteHeaderStyle, runbookNoteHeaderStyle)
-	fmt.Fprintf(&b, "<tr><td style='%s'>%s</td><td style='%s'>%s</td></tr>", runbookNoteCellStyle, alert, runbookNoteCellStyle, runbook)
+	fmt.Fprintf(&b, "<tr><th style='%s'>Runbook</th></tr>", runbookNoteHeaderStyle)
+	fmt.Fprintf(&b, "<tr><td style='%s'>%s</td></tr>", runbookNoteCellStyle, runbook)
 	b.WriteString("</table>")
 	return b.String()
 }

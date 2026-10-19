@@ -9295,10 +9295,9 @@ paths:
       description: >
         Every alert name with its runbook link, ordered by alert name. A new
         incident whose subject contains an alert name gets an HTML work note,
-        added after every other creation note: a table with an Alert | Runbook
-        header row and one row holding the matched alert name and the runbook
-        link ("No runbook available for this alert." in the Runbook cell when
-        the entry has no link). An alert-born incident (one with a correlationId)
+        added after every other creation note: a table with a Runbook header
+        row and one row holding the runbook link ("No runbook available for
+        this alert." when the matched entry has no link). An alert-born incident (one with a correlationId)
         that matches no entry gets "No runbook available for this alert." alone.
         Internal callers only.
       operationId: listRunbooks
