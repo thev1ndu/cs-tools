@@ -44,16 +44,18 @@ func TestRunbookNote(t *testing.T) {
 	linked := runbookNote(testRunbooks, domain.CreateIncidentRequest{
 		Subject: "[Alert]Fired:Sev0 Azure Monitor Alert EXAMPLE-gw-CriticalHTTP5xxCountLimitExceeded-prod-001 on log-002"})
 	for _, want := range []string{
-		"<p>Runbook for this alert</p><table style='border:1px solid #dcdcdc; border-collapse:collapse;",
-		">alert_name</td><td style='padding:8px; border:1px solid #dcdcdc;'>example-gw-CriticalHTTP5xxCountLimitExceeded-prod-001</td>",
-		`<a href="https://docs.example.com/gw-5xx" target="_blank" rel="noopener noreferrer">https://docs.example.com/gw-5xx</a>`,
+		"<table style='border:1px solid #dcdcdc; border-collapse:collapse;",
+		">Alert</th><th style=",
+		">Runbook</th></tr>",
+		">example-gw-CriticalHTTP5xxCountLimitExceeded-prod-001</td>",
+		`<a href="https://docs.example.com/gw-5xx" target="_blank" rel="noopener noreferrer">https://docs.example.com/gw-5xx</a></td></tr></table>`,
 	} {
 		if !strings.Contains(linked, want) {
 			t.Fatalf("linked note %q does not contain %q", linked, want)
 		}
 	}
-	if strings.Contains(linked, "[code]") {
-		t.Fatalf("note must not carry a [code] wrapper: %q", linked)
+	if !strings.HasPrefix(linked, "<table") || strings.Contains(linked, "[code]") || strings.Contains(linked, "alert_name") {
+		t.Fatalf("note must be the Alert | Runbook table alone: %q", linked)
 	}
 
 	short := runbookNote(testRunbooks, domain.CreateIncidentRequest{Subject: "example-gw-CriticalHTTP5xx spike"})
@@ -62,7 +64,7 @@ func TestRunbookNote(t *testing.T) {
 	}
 
 	unlinked := runbookNote(testRunbooks, domain.CreateIncidentRequest{Subject: "Icinga Alert: demo-node-01 / JVM Heap"})
-	if !strings.HasPrefix(unlinked, "<p>"+noRunbookNoteText+"</p><table") || !strings.Contains(unlinked, "Icinga Alert: demo-node-01 / JVM Heap") {
+	if !strings.Contains(unlinked, ">Icinga Alert: demo-node-01 / JVM Heap</td>") || !strings.Contains(unlinked, ">"+noRunbookNoteText+"</td>") {
 		t.Fatalf("unlinked note = %q", unlinked)
 	}
 
@@ -87,7 +89,7 @@ func TestRunbookNote_EscapesCatalogValues(t *testing.T) {
 func TestWithRunbookNote_AppendsAfterCallerNotes(t *testing.T) {
 	req := domain.CreateIncidentRequest{Subject: "Icinga Alert: demo-node-01 / JVM Heap", WorkNotes: strp("<p>Created by alert-core.</p>")}
 	got := withRunbookNote(context.Background(), req, fakeRunbookLister{runbooks: testRunbooks})
-	want := "<p>Created by alert-core.</p><p>" + noRunbookNoteText + "</p>"
+	want := "<p>Created by alert-core.</p><table"
 	if got.WorkNotes == nil || !strings.HasPrefix(*got.WorkNotes, want) {
 		t.Fatalf("WorkNotes = %v, want %q", got.WorkNotes, want)
 	}
