@@ -29,7 +29,9 @@ import (
 )
 
 const (
+	maxRunbookNameLength      = 1000
 	maxRunbookAlertNameLength = 1000
+	maxRunbookAlerts          = 500
 	maxRunbookURLLength       = 2000
 	maxRunbookImportEntries   = 5000
 )
@@ -98,7 +100,7 @@ func (s *runbookService) Import(ctx context.Context, req domain.ImportRunbooksRe
 	if len(req.Runbooks) > maxRunbookImportEntries {
 		return domain.ImportRunbooksResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("runbooks must have at most %d entries", maxRunbookImportEntries)}
 	}
-	// Later entries win over earlier ones with the same alert name, so one statement never touches a row twice.
+	// Later entries win: a repeated name replaces the earlier entry, and a repeated alert leaves the earlier runbook.
 	order := []string{}
 	byName := map[string]domain.SaveRunbookRequest{}
 	for i, r := range req.Runbooks {
@@ -106,15 +108,29 @@ func (s *runbookService) Import(ctx context.Context, req domain.ImportRunbooksRe
 		if err != nil {
 			return domain.ImportRunbooksResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("runbooks[%d]: %s", i, err.Error())}
 		}
-		key := strings.ToLower(clean.AlertName)
+		key := strings.ToLower(clean.Name)
 		if _, seen := byName[key]; !seen {
 			order = append(order, key)
 		}
 		byName[key] = clean
 	}
+	alertOwner := map[string]string{}
+	for _, key := range order {
+		for _, a := range byName[key].Alerts {
+			alertOwner[strings.ToLower(a)] = key
+		}
+	}
 	entries := make([]domain.SaveRunbookRequest, 0, len(order))
 	for _, key := range order {
-		entries = append(entries, byName[key])
+		e := byName[key]
+		kept := make([]string, 0, len(e.Alerts))
+		for _, a := range e.Alerts {
+			if alertOwner[strings.ToLower(a)] == key {
+				kept = append(kept, a)
+			}
+		}
+		e.Alerts = kept
+		entries = append(entries, e)
 	}
 	return s.repo.Import(ctx, actorOf(ctx), entries)
 }
@@ -123,16 +139,34 @@ func validateRunbookID(id string) error {
 	return validateUUIDs("id", []string{id})
 }
 
-// normalizeRunbook trims both fields, turns a blank link into nil and checks what is left.
+// normalizeRunbook trims every field, turns a blank link into nil, drops blank and repeated alerts and checks what is left.
 func normalizeRunbook(req domain.SaveRunbookRequest) (domain.SaveRunbookRequest, error) {
-	name := strings.TrimSpace(req.AlertName)
+	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return req, &apierror.ValidationError{Msg: "alertName is required"}
+		return req, &apierror.ValidationError{Msg: "name is required"}
 	}
-	if utf8.RuneCountInString(name) > maxRunbookAlertNameLength {
-		return req, &apierror.ValidationError{Msg: fmt.Sprintf("alertName must be at most %d characters", maxRunbookAlertNameLength)}
+	if utf8.RuneCountInString(name) > maxRunbookNameLength {
+		return req, &apierror.ValidationError{Msg: fmt.Sprintf("name must be at most %d characters", maxRunbookNameLength)}
 	}
-	out := domain.SaveRunbookRequest{AlertName: name}
+	out := domain.SaveRunbookRequest{Name: name, Alerts: []string{}}
+	seen := map[string]bool{}
+	for _, a := range req.Alerts {
+		alert := strings.TrimSpace(a)
+		if alert == "" || seen[strings.ToLower(alert)] {
+			continue
+		}
+		if utf8.RuneCountInString(alert) > maxRunbookAlertNameLength {
+			return req, &apierror.ValidationError{Msg: fmt.Sprintf("each alert must be at most %d characters", maxRunbookAlertNameLength)}
+		}
+		seen[strings.ToLower(alert)] = true
+		out.Alerts = append(out.Alerts, alert)
+	}
+	if len(out.Alerts) == 0 {
+		return req, &apierror.ValidationError{Msg: "alerts must have at least one alert name"}
+	}
+	if len(out.Alerts) > maxRunbookAlerts {
+		return req, &apierror.ValidationError{Msg: fmt.Sprintf("alerts must have at most %d alert names", maxRunbookAlerts)}
+	}
 	if req.RunbookURL != nil {
 		link := strings.TrimSpace(*req.RunbookURL)
 		if link != "" {

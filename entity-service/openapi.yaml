@@ -9293,10 +9293,10 @@ paths:
     get:
       summary: List the runbook catalog.
       description: >
-        Every alert name with its runbook link, ordered by alert name. The
-        portal shows an incident's runbook in its Related tab: the entry with
-        the longest alert name the incident's subject contains, ignoring case.
-        Internal callers only.
+        Every runbook with its link and alert names, ordered by name. The
+        portal shows an incident's runbook in its Related tab: the runbook
+        holding the longest alert name the incident's subject contains,
+        ignoring case. Internal callers only.
       operationId: listRunbooks
       responses:
         "200":
@@ -9324,7 +9324,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     post:
-      summary: Add a runbook entry.
+      summary: Add a runbook.
+      description: 409 when the name, or one of the alert names, already belongs to another runbook (ignoring case and surrounding spaces).
       operationId: createRunbook
       requestBody:
         required: true
@@ -9377,11 +9378,13 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /runbooks/import:
     post:
-      summary: Create or update many runbook entries by alert name.
+      summary: Create or replace many runbooks by name.
       description: >
-        One transaction. An entry whose alert name exists (ignoring case and
-        surrounding spaces) has its link replaced; a later entry with the same
-        name in the request wins. At most 5000 entries.
+        One transaction. An entry whose name exists (ignoring case and
+        surrounding spaces) replaces that runbook's link and alerts; an alert
+        listed under another runbook moves to the entry naming it. Within the
+        request, a later entry wins over an earlier one with the same name or
+        alert. At most 5000 entries.
       operationId: importRunbooks
       requestBody:
         required: true
@@ -9428,7 +9431,8 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /runbooks/{id}:
     put:
-      summary: Change a runbook entry.
+      summary: Change a runbook, replacing its alerts.
+      description: 409 when the name, or one of the alert names, already belongs to another runbook.
       operationId: updateRunbook
       parameters:
         - name: id
@@ -9487,7 +9491,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
-      summary: Remove a runbook entry.
+      summary: Remove a runbook and its alerts.
       operationId: deleteRunbook
       parameters:
         - name: id
@@ -25496,18 +25500,22 @@ components:
           format: date-time
     Runbook:
       type: object
-      required: [id, alertName, runbookUrl, createdOn, createdBy, updatedOn, updatedBy]
+      required: [id, name, runbookUrl, alerts, createdOn, createdBy, updatedOn, updatedBy]
       properties:
         id:
           type: string
           format: uuid
-        alertName:
+        name:
           type: string
-          description: Matched against a new incident's subject (contains, ignoring case).
         runbookUrl:
           type: string
           nullable: true
-          description: The runbook link; null when the alert has no runbook yet.
+          description: The runbook link; null when the runbook is not written yet.
+        alerts:
+          type: array
+          description: Alert names matched against an incident's subject (contains, ignoring case), ordered by name.
+          items:
+            type: string
         createdOn:
           type: string
           format: date-time
@@ -25528,15 +25536,23 @@ components:
             $ref: '#/components/schemas/Runbook'
     SaveRunbookRequest:
       type: object
-      required: [alertName]
+      required: [name, alerts]
       properties:
-        alertName:
+        name:
           type: string
           maxLength: 1000
         runbookUrl:
           type: string
           nullable: true
           description: A full http(s) link; empty or null records that no runbook exists.
+        alerts:
+          type: array
+          minItems: 1
+          maxItems: 500
+          description: Blank and repeated (ignoring case) names are dropped; at least one must remain.
+          items:
+            type: string
+            maxLength: 1000
     ImportRunbooksRequest:
       type: object
       required: [runbooks]

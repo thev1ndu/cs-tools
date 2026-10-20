@@ -130,7 +130,7 @@ type SavedFilterViewService interface {
 	Reorder(ctx context.Context, req domain.ReorderSavedFilterViewRequest) (domain.SavedFilterViewList, error)
 }
 
-// RunbookService manages the alert-name to runbook catalog (Operations > Runbooks).
+// RunbookService manages the runbook catalog (Operations > Runbooks): named runbook links and their alert names.
 type RunbookService interface {
 	List(ctx context.Context) (domain.RunbookList, error)
 	Create(ctx context.Context, req domain.SaveRunbookRequest) (domain.Runbook, error)

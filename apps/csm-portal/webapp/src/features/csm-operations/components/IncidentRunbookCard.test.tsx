@@ -28,9 +28,9 @@ vi.mock("@features/csm-operations/api/useRunbooks", () => ({
 }));
 
 const catalog = [
-  { alertName: "gw-5xx", runbookUrl: "https://docs.example.com/gw-5xx" },
-  { alertName: "example-gw-5xx", runbookUrl: "https://docs.example.com/example-gw-5xx" },
-  { alertName: "JVM Heap", runbookUrl: null },
+  { name: "Gateway", runbookUrl: "https://docs.example.com/gw-5xx", alerts: ["gw-5xx"] },
+  { name: "Example gateway", runbookUrl: "https://docs.example.com/example-gw-5xx", alerts: ["gw-latency", "example-gw-5xx"] },
+  { name: "JVM", runbookUrl: null, alerts: ["JVM Heap"] },
 ];
 
 describe("IncidentRunbookCard", () => {
@@ -40,6 +40,7 @@ describe("IncidentRunbookCard", () => {
 
   it("links the runbook of the longest alert name the subject contains", () => {
     render(<IncidentRunbookCard subject="[Alert] Fired: EXAMPLE-GW-5xx on prod" />);
+    expect(screen.getByText("Example gateway")).toBeInTheDocument();
     expect(screen.getByText("example-gw-5xx")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open runbook/ })).toHaveAttribute(
       "href",

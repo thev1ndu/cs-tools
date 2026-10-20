@@ -24,7 +24,7 @@ interface IncidentRunbookCardProps {
   subject: string;
 }
 
-/** The incident's runbook from Operations > Runbooks: the longest alert name its subject contains. */
+/** The incident's runbook from Operations > Runbooks: the one holding the longest alert name its subject contains. */
 export default function IncidentRunbookCard({ subject }: IncidentRunbookCardProps): JSX.Element {
   const { data: runbooks, isLoading, isError } = useRunbooks();
   const match = useMemo(
@@ -50,12 +50,15 @@ export default function IncidentRunbookCard({ subject }: IncidentRunbookCardProp
   } else {
     body = (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+        <Typography variant="body2" sx={{ wordBreak: "break-word" }}>
+          {match.runbook.name}
+        </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-word" }}>
           Matched alert: <Box component="code">{match.alertName}</Box>
         </Typography>
-        {match.runbookUrl ? (
+        {match.runbook.runbookUrl ? (
           <Link
-            href={match.runbookUrl}
+            href={match.runbook.runbookUrl}
             target="_blank"
             rel="noopener noreferrer"
             sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, alignSelf: "flex-start" }}

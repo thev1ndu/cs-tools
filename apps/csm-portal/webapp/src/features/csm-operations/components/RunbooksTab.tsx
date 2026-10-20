@@ -16,6 +16,7 @@
 
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Chip,
@@ -57,6 +58,7 @@ import {
   useUpdateRunbook,
 } from "@features/csm-operations/api/useRunbooks";
 import {
+  cleanAlertNames,
   findRunbookForIncident,
   isValidRunbookUrl,
   parseRunbookImport,
@@ -65,6 +67,7 @@ import {
 } from "@features/csm-operations/utils/runbooks";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
+const VISIBLE_ALERT_CHIPS = 5;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
 
 interface RunbookDialogState {
@@ -77,8 +80,9 @@ function errorText(err: unknown, fallback: string): string {
 }
 
 /**
- * Operations -> Runbooks: the alert-name to runbook catalog. An incident whose
- * subject contains an alert name listed here shows its runbook in the Related tab.
+ * Operations -> Runbooks: named runbook links, each with the alert names it covers.
+ * An incident whose subject contains one of those alert names shows the runbook in
+ * its Related tab.
  */
 export default function RunbooksTab(): JSX.Element {
   const { canWrite } = usePortalAccess();
@@ -96,13 +100,19 @@ export default function RunbooksTab(): JSX.Element {
   const [notice, setNotice] = useState<{ severity: "success" | "error"; text: string } | null>(null);
 
   const linkedCount = runbooks.filter((r) => r.runbookUrl).length;
+  const alertCount = runbooks.reduce((n, r) => n + r.alerts.length, 0);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return runbooks.filter((r) => {
       if (coverage === "linked" && !r.runbookUrl) return false;
       if (coverage === "missing" && r.runbookUrl) return false;
-      return !term || r.alertName.toLowerCase().includes(term) || (r.runbookUrl ?? "").toLowerCase().includes(term);
+      return (
+        !term ||
+        r.name.toLowerCase().includes(term) ||
+        r.alerts.some((a) => a.toLowerCase().includes(term)) ||
+        (r.runbookUrl ?? "").toLowerCase().includes(term)
+      );
     });
   }, [runbooks, search, coverage]);
 
@@ -139,7 +149,9 @@ export default function RunbooksTab(): JSX.Element {
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
         <Typography variant="body2" color="text.secondary">
-          {isLoading ? "Loading runbooks…" : `${runbooks.length} alerts, ${linkedCount} with a runbook, ${runbooks.length - linkedCount} without`}
+          {isLoading
+            ? "Loading runbooks…"
+            : `${runbooks.length} runbooks covering ${alertCount} alerts, ${runbooks.length - linkedCount} without a link`}
         </Typography>
         {canWrite && (
           <Box sx={{ display: "flex", gap: 1 }}>
@@ -184,7 +196,7 @@ export default function RunbooksTab(): JSX.Element {
           <Box sx={{ flex: 1, minWidth: 240 }}>
             <TextField
               size="small"
-              placeholder="Search by alert name or runbook link…"
+              placeholder="Search by name, alert name or runbook link…"
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -192,7 +204,7 @@ export default function RunbooksTab(): JSX.Element {
               }}
               fullWidth
               slotProps={{
-                htmlInput: { "aria-label": "Search runbooks by alert name or link" },
+                htmlInput: { "aria-label": "Search runbooks by name, alert name or link" },
                 input: {
                   startAdornment: (
                     <InputAdornment position="start">
@@ -270,8 +282,9 @@ export default function RunbooksTab(): JSX.Element {
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
               <TableRow sx={{ bgcolor: "action.hover" }}>
-                <TableCell>Alert name</TableCell>
-                <TableCell sx={{ width: 220 }}>Runbook</TableCell>
+                <TableCell sx={{ width: 260 }}>Name</TableCell>
+                <TableCell sx={{ width: 180 }}>Runbook</TableCell>
+                <TableCell>Alerts</TableCell>
                 {canWrite && <TableCell align="right" sx={{ width: 96 }}>Actions</TableCell>}
               </TableRow>
             </TableHead>
@@ -279,20 +292,21 @@ export default function RunbooksTab(): JSX.Element {
               {isLoading ? (
                 Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="70%" height={18} /></TableCell>
                     <TableCell><Skeleton variant="rounded" width={110} height={22} /></TableCell>
+                    <TableCell><Skeleton variant="rounded" width="80%" height={22} /></TableCell>
                     {canWrite && <TableCell><Skeleton variant="rounded" width={56} height={18} /></TableCell>}
                   </TableRow>
                 ))
               ) : isError ? (
                 <TableRow>
-                  <TableCell colSpan={canWrite ? 3 : 2} align="center">
+                  <TableCell colSpan={canWrite ? 4 : 3} align="center">
                     <QueryErrorState message={errorText(error, "Failed to load runbooks.")} error={error} onRetry={() => void refetch()} />
                   </TableCell>
                 </TableRow>
               ) : pageRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={canWrite ? 3 : 2} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={canWrite ? 4 : 3} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
                       No runbooks found.
                     </Typography>
@@ -301,8 +315,8 @@ export default function RunbooksTab(): JSX.Element {
               ) : (
                 pageRows.map((rb) => (
                   <TableRow key={rb.id} hover>
-                    <TableCell sx={{ wordBreak: "break-word", maxWidth: 720 }}>
-                      <Typography variant="body2">{rb.alertName}</Typography>
+                    <TableCell sx={{ wordBreak: "break-word" }}>
+                      <Typography variant="body2">{rb.name}</Typography>
                     </TableCell>
                     <TableCell>
                       {rb.runbookUrl ? (
@@ -319,15 +333,18 @@ export default function RunbooksTab(): JSX.Element {
                         <Chip size="small" variant="outlined" color="warning" label="No runbook" />
                       )}
                     </TableCell>
+                    <TableCell>
+                      <AlertChips alerts={rb.alerts} />
+                    </TableCell>
                     {canWrite && (
                       <TableCell align="right">
                         <Tooltip title="Edit">
-                          <IconButton size="small" aria-label={`Edit ${rb.alertName}`} onClick={() => setDialog({ open: true, editing: rb })}>
+                          <IconButton size="small" aria-label={`Edit ${rb.name}`} onClick={() => setDialog({ open: true, editing: rb })}>
                             <Pencil size={16} />
                           </IconButton>
                         </Tooltip>
                         <Tooltip title="Delete">
-                          <IconButton size="small" aria-label={`Delete ${rb.alertName}`} onClick={() => setPendingDelete(rb)}>
+                          <IconButton size="small" aria-label={`Delete ${rb.name}`} onClick={() => setPendingDelete(rb)}>
                             <Trash2 size={16} />
                           </IconButton>
                         </Tooltip>
@@ -356,7 +373,7 @@ export default function RunbooksTab(): JSX.Element {
         />
       </Box>
 
-      <RunbookMatchPreview runbooks={runbooks} />
+      <RunbookAlertSearch runbooks={runbooks} />
 
       {dialog.open && (
         <RunbookDialog
@@ -370,7 +387,8 @@ export default function RunbooksTab(): JSX.Element {
         <DialogTitle>Delete runbook?</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Typography variant="body2" sx={{ wordBreak: "break-word" }}>
-            Incidents for <strong>{pendingDelete?.alertName}</strong> will no longer show this runbook.
+            Incidents matching the {pendingDelete?.alerts.length === 1 ? "alert" : `${pendingDelete?.alerts.length ?? 0} alerts`} of{" "}
+            <strong>{pendingDelete?.name}</strong> will no longer show this runbook.
           </Typography>
           {deleteRunbook.isError && (
             <Alert severity="error">{errorText(deleteRunbook.error, "Failed to delete the runbook.")}</Alert>
@@ -393,24 +411,49 @@ interface RunbookDialogProps {
   onClose: () => void;
 }
 
+function AlertChips({ alerts }: { alerts: string[] }): JSX.Element {
+  const shown = alerts.slice(0, VISIBLE_ALERT_CHIPS);
+  const hidden = alerts.slice(VISIBLE_ALERT_CHIPS);
+  return (
+    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+      {shown.map((a) => (
+        <Chip key={a} size="small" variant="outlined" label={a} sx={{ maxWidth: "100%" }} />
+      ))}
+      {hidden.length > 0 && (
+        <Tooltip title={hidden.join(", ")}>
+          <Chip size="small" label={`+${hidden.length} more`} />
+        </Tooltip>
+      )}
+    </Box>
+  );
+}
+
 function RunbookDialog({ editing, existing, onClose }: RunbookDialogProps): JSX.Element {
   const createRunbook = useCreateRunbook();
   const updateRunbook = useUpdateRunbook();
-  const [alertName, setAlertName] = useState(editing?.alertName ?? "");
+  const [name, setName] = useState(editing?.name ?? "");
   const [runbookUrl, setRunbookUrl] = useState(editing?.runbookUrl ?? "");
+  const [alerts, setAlerts] = useState<string[]>(editing?.alerts ?? []);
+  const [pendingAlert, setPendingAlert] = useState("");
 
   const saving = createRunbook.isPending || updateRunbook.isPending;
   const saveError = createRunbook.error ?? updateRunbook.error;
-  const trimmedName = alertName.trim();
+  const trimmedName = name.trim();
   const trimmedUrl = runbookUrl.trim();
-  const duplicate = existing.some(
-    (r) => r.id !== editing?.id && r.alertName.trim().toLowerCase() === trimmedName.toLowerCase(),
-  );
+  // A typed alert not yet confirmed with Enter is still saved.
+  const alertsToSave = cleanAlertNames([...alerts, pendingAlert]);
+  const others = existing.filter((r) => r.id !== editing?.id);
+  const duplicateName = others.some((r) => r.name.trim().toLowerCase() === trimmedName.toLowerCase());
+  const takenAlerts = alertsToSave.flatMap((a) => {
+    const owner = others.find((r) => r.alerts.some((b) => b.trim().toLowerCase() === a.toLowerCase()));
+    return owner ? [`${a} (in ${owner.name})`] : [];
+  });
   const urlInvalid = !isValidRunbookUrl(runbookUrl);
-  const canSave = trimmedName.length > 0 && !duplicate && !urlInvalid && !saving;
+  const canSave =
+    trimmedName.length > 0 && !duplicateName && alertsToSave.length > 0 && takenAlerts.length === 0 && !urlInvalid && !saving;
 
   const handleSave = (): void => {
-    const input = { alertName: trimmedName, runbookUrl: trimmedUrl || null };
+    const input = { name: trimmedName, runbookUrl: trimmedUrl || null, alerts: alertsToSave };
     if (editing) {
       updateRunbook.mutate({ id: editing.id, input }, { onSuccess: onClose });
     } else {
@@ -423,18 +466,13 @@ function RunbookDialog({ editing, existing, onClose }: RunbookDialogProps): JSX.
       <DialogTitle>{editing ? "Edit runbook" : "Add runbook"}</DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: "8px !important" }}>
         <TextField
-          label="Alert name"
+          label="Name"
           required
           autoFocus
-          multiline
-          value={alertName}
-          onChange={(e) => setAlertName(e.target.value)}
-          error={duplicate}
-          helperText={
-            duplicate
-              ? "This alert already has an entry."
-              : "Matched against a new incident's subject (contains, case-insensitive)."
-          }
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          error={duplicateName}
+          helperText={duplicateName ? "Another runbook already has this name." : undefined}
         />
         <TextField
           label="Runbook link"
@@ -443,6 +481,40 @@ function RunbookDialog({ editing, existing, onClose }: RunbookDialogProps): JSX.
           onChange={(e) => setRunbookUrl(e.target.value)}
           error={urlInvalid}
           helperText={urlInvalid ? "Enter a full http(s) link." : "Leave empty to record that no runbook exists yet."}
+        />
+        <Autocomplete
+          multiple
+          freeSolo
+          options={[]}
+          value={alerts}
+          inputValue={pendingAlert}
+          onInputChange={(_e, value, reason) => {
+            if (reason !== "reset") setPendingAlert(value);
+          }}
+          onChange={(_e, value) => {
+            setAlerts(cleanAlertNames(value as string[]));
+            setPendingAlert("");
+          }}
+          renderTags={(value, getTagProps) =>
+            value.map((option, index) => {
+              const { key, ...tagProps } = getTagProps({ index });
+              return <Chip key={key} size="small" label={option} {...tagProps} />;
+            })
+          }
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Alerts"
+              required
+              placeholder={alerts.length === 0 ? "Type an alert name and press Enter" : undefined}
+              error={takenAlerts.length > 0}
+              helperText={
+                takenAlerts.length > 0
+                  ? `Already used by another runbook: ${takenAlerts.join(", ")}`
+                  : "Press Enter after each alert name. An incident whose subject contains one gets this runbook (case-insensitive)."
+              }
+            />
+          )}
         />
         {saveError && <Alert severity="error">{errorText(saveError, "Failed to save the runbook.")}</Alert>}
       </DialogContent>
@@ -456,45 +528,55 @@ function RunbookDialog({ editing, existing, onClose }: RunbookDialogProps): JSX.
   );
 }
 
-function RunbookMatchPreview({ runbooks }: { runbooks: Runbook[] }): JSX.Element {
-  const [subject, setSubject] = useState("");
-  const match = subject.trim() ? findRunbookForIncident(runbooks, subject) : undefined;
+function RunbookAlertSearch({ runbooks }: { runbooks: Runbook[] }): JSX.Element {
+  const [query, setQuery] = useState("");
+  const match = query.trim() ? findRunbookForIncident(runbooks, query) : undefined;
 
   return (
     <Paper sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
       <Box>
-        <Typography variant="subtitle2">Try it with an incident</Typography>
+        <Typography variant="subtitle2">Search runbook with alert name</Typography>
         <Typography variant="body2" color="text.secondary">
-          Paste an incident subject to see which runbook it matches.
+          Enter an alert name, or paste an incident subject, to find the runbook that covers it.
         </Typography>
       </Box>
       <TextField
         size="small"
-        placeholder="[Alert]Fired:Sev0 Azure Monitor Alert example-gw-CriticalHTTP5xxCountLimitExceeded-prod-001 on …"
-        value={subject}
-        onChange={(e) => setSubject(e.target.value)}
+        placeholder="example-gw-CriticalHTTP5xxCountLimitExceeded-prod-001"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        slotProps={{ htmlInput: { "aria-label": "Search runbook with alert name" } }}
       />
-      {subject.trim() && (
-        <Alert severity={match?.runbookUrl ? "success" : "warning"}>
-          <Typography variant="body2" sx={{ wordBreak: "break-word" }}>
-            {match ? `Matched alert: ${match.alertName}` : "No alert in the catalog matches this incident."}
-          </Typography>
-          {match?.runbookUrl ? (
+      {query.trim() && (
+        <Alert severity={match?.runbook.runbookUrl ? "success" : "warning"}>
+          {match ? (
+            <>
+              <Typography variant="body2" sx={{ fontWeight: 600, wordBreak: "break-word" }}>
+                {match.runbook.name}
+              </Typography>
+              <Typography variant="body2" sx={{ wordBreak: "break-word" }}>
+                Matched alert: {match.alertName}
+              </Typography>
+            </>
+          ) : (
+            <Typography variant="body2">No runbook covers this alert.</Typography>
+          )}
+          {match?.runbook.runbookUrl ? (
             <Link
-              href={match.runbookUrl}
+              href={match.runbook.runbookUrl}
               target="_blank"
               rel="noopener noreferrer"
               variant="body2"
               sx={{ mt: 0.5, display: "inline-flex", alignItems: "center", gap: 0.5, fontWeight: 600, wordBreak: "break-all" }}
             >
-              {match.runbookUrl}
+              {match.runbook.runbookUrl}
               <ExternalLink size={14} />
             </Link>
-          ) : (
+          ) : match ? (
             <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }}>
-              No runbook available for this alert.
+              No runbook written for it yet.
             </Typography>
-          )}
+          ) : null}
         </Alert>
       )}
     </Paper>

@@ -15,40 +15,63 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { findRunbookForIncident, parseRunbookImport } from "./runbooks";
+import { cleanAlertNames, findRunbookForIncident, parseRunbookImport } from "./runbooks";
 
 describe("parseRunbookImport", () => {
-  it("reads an object of alert name to link, blank meaning no runbook", () => {
-    expect(parseRunbookImport('{"Alert A": "https://docs.example.com/a", " Alert B ": ""}')).toEqual([
-      { alertName: "Alert A", runbookUrl: "https://docs.example.com/a" },
-      { alertName: "Alert B", runbookUrl: null },
+  it("reads an object whose keys are comma-separated alert names, keeping spaces inside a name", () => {
+    expect(
+      parseRunbookImport('{"Alert 1, Alert 2 ,alert 1": "https://docs.example.com/a", " Alert B ": ""}'),
+    ).toEqual([
+      { name: "Alert 1", runbookUrl: "https://docs.example.com/a", alerts: ["Alert 1", "Alert 2"] },
+      { name: "Alert B", runbookUrl: null, alerts: ["Alert B"] },
     ]);
   });
 
-  it("reads a list of entries", () => {
-    expect(parseRunbookImport('[{"alertName": "A", "runbookUrl": null}]')).toEqual([{ alertName: "A", runbookUrl: null }]);
+  it("reads a list of runbooks with a list or a comma-separated string of alerts", () => {
+    expect(
+      parseRunbookImport('[{"name": "Gateway", "runbookUrl": null, "alerts": ["a", "b"]}, {"alerts": "c, d"}]'),
+    ).toEqual([
+      { name: "Gateway", runbookUrl: null, alerts: ["a", "b"] },
+      { name: "c", runbookUrl: null, alerts: ["c", "d"] },
+    ]);
   });
 
-  it("refuses bad JSON, blank names and links that are not http(s)", () => {
+  it("still reads an older list entry with one alertName", () => {
+    expect(parseRunbookImport('[{"alertName": "A", "runbookUrl": null}]')).toEqual([
+      { name: "A", runbookUrl: null, alerts: ["A"] },
+    ]);
+  });
+
+  it("refuses bad JSON, entries with no alert and links that are not http(s)", () => {
     expect(() => parseRunbookImport("{")).toThrow("not valid JSON");
-    expect(() => parseRunbookImport('[{"alertName": " "}]')).toThrow("alert name");
+    expect(() => parseRunbookImport('[{"name": "N", "alerts": [" "]}]')).toThrow("at least one alert name");
+    expect(() => parseRunbookImport('{" , ": "https://x.example"}')).toThrow("at least one alert name");
     expect(() => parseRunbookImport('{"A": "javascript:alert(1)"}')).toThrow("http(s)");
+  });
+});
+
+describe("cleanAlertNames", () => {
+  it("trims and drops blanks and repeats, ignoring case", () => {
+    expect(cleanAlertNames([" a ", "", "A", "b"])).toEqual(["a", "b"]);
   });
 });
 
 describe("findRunbookForIncident", () => {
   const catalog = [
-    { alertName: "gw-5xx", runbookUrl: "https://docs.example.com/short" },
-    { alertName: "gw-5xx-prod-001", runbookUrl: "https://docs.example.com/long" },
-    { alertName: "JVM Heap", runbookUrl: null },
+    { name: "Gateway", runbookUrl: "https://docs.example.com/gw", alerts: ["gw-5xx", "gw-latency"] },
+    { name: "Gateway prod", runbookUrl: "https://docs.example.com/long", alerts: ["gw-5xx-prod-001"] },
+    { name: "JVM", runbookUrl: null, alerts: ["JVM Heap"] },
   ];
 
-  it("picks the longest alert name the subject contains, ignoring case", () => {
-    expect(findRunbookForIncident(catalog, "Fired GW-5XX-PROD-001 on log")?.runbookUrl).toBe("https://docs.example.com/long");
+  it("picks the runbook holding the longest alert name the subject contains, ignoring case", () => {
+    const match = findRunbookForIncident(catalog, "Fired GW-5XX-PROD-001 on log");
+    expect(match?.runbook.name).toBe("Gateway prod");
+    expect(match?.alertName).toBe("gw-5xx-prod-001");
+    expect(findRunbookForIncident(catalog, "gw-latency spike")?.runbook.name).toBe("Gateway");
   });
 
-  it("finds a known alert without a link, and nothing for an unknown subject", () => {
-    expect(findRunbookForIncident(catalog, "node / jvm heap")).toEqual({ alertName: "JVM Heap", runbookUrl: null });
+  it("finds a runbook without a link, and nothing for an unknown subject", () => {
+    expect(findRunbookForIncident(catalog, "node / jvm heap")?.runbook.runbookUrl).toBeNull();
     expect(findRunbookForIncident(catalog, "unrelated")).toBeUndefined();
   });
 });
