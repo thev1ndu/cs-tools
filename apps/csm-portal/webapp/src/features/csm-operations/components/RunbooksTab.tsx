@@ -71,6 +71,8 @@ import {
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 const VISIBLE_ALERT_CHIPS = 5;
+// A Select treats "" as no selection and leaves its label inside the box, so "Anyone" needs a real value.
+const ANY_EDITOR = "__anyone__";
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
 
 interface RunbookDialogState {
@@ -293,10 +295,10 @@ export default function RunbooksTab(): JSX.Element {
                     labelId="runbook-filter-updated-by-label"
                     id="runbook-filter-updated-by"
                     label="Last updated by"
-                    value={filters.updatedBy}
-                    onChange={(e) => setFilter("updatedBy", e.target.value)}
+                    value={filters.updatedBy || ANY_EDITOR}
+                    onChange={(e) => setFilter("updatedBy", e.target.value === ANY_EDITOR ? "" : e.target.value)}
                   >
-                    <MenuItem value="">Anyone</MenuItem>
+                    <MenuItem value={ANY_EDITOR}>Anyone</MenuItem>
                     {editors.map((who) => (
                       <MenuItem key={who} value={who}>
                         {who}

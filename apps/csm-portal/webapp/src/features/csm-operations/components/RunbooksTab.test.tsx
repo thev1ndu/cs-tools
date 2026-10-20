@@ -116,6 +116,13 @@ describe("RunbooksTab", () => {
     );
   });
 
+  it("shows Anyone as the default editor filter, like the other filters show their default", () => {
+    render(<RunbooksTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    expect(screen.getByRole("combobox", { name: "Last updated by" })).toHaveTextContent("Anyone");
+    expect(screen.getByRole("combobox", { name: "Last updated" })).toHaveTextContent("Any time");
+  });
+
   it("searches the runbook with an alert name", () => {
     render(<RunbooksTab />);
     const search = screen.getByLabelText("Search runbook with alert name");
