@@ -129,6 +129,9 @@ func (s *runbookService) Import(ctx context.Context, req domain.ImportRunbooksRe
 				kept = append(kept, a)
 			}
 		}
+		if len(kept) == 0 {
+			return domain.ImportRunbooksResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("runbook %s has no alerts left: a later entry takes all of them", e.Name)}
+		}
 		e.Alerts = kept
 		entries = append(entries, e)
 	}

@@ -179,3 +179,34 @@ func TestRunbookIntegration_ImportUpsertsByNameAndMovesAlerts(t *testing.T) {
 		}
 	}
 }
+
+func TestRunbookIntegration_ImportNeverEmptiesARunbookItDoesNotName(t *testing.T) {
+	ctx := context.Background()
+	repo := repository.NewRunbookRepository(runbookTestPool(t, ""))
+	if _, err := repo.Create(ctx, "a@x", domain.SaveRunbookRequest{Name: "Disk", Alerts: []string{"disk-low", "disk-full"}}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	_, err := repo.Import(ctx, "i@x", []domain.SaveRunbookRequest{{Name: "Storage", Alerts: []string{"DISK-LOW", "disk-full"}}})
+	if !isConflict(err) || err.Error() != "importing would leave runbook Disk without alerts" {
+		t.Fatalf("err = %v, want the conflict naming Disk", err)
+	}
+	got, _ := repo.List(ctx)
+	if len(got) != 1 || got[0].Name != "Disk" || len(got[0].Alerts) != 2 {
+		t.Fatalf("a refused import must change nothing, got %+v", got)
+	}
+
+	if _, err := repo.Import(ctx, "i@x", []domain.SaveRunbookRequest{
+		{Name: "Storage", Alerts: []string{"disk-low", "disk-full"}},
+		{Name: "Disk", Alerts: []string{"disk-io"}},
+	}); err != nil {
+		t.Fatalf("a runbook the import names may lose its alerts to another entry: %v", err)
+	}
+	got, _ = repo.List(ctx)
+	want := map[string][]string{"Disk": {"disk-io"}, "Storage": {"disk-full", "disk-low"}}
+	for _, rb := range got {
+		if !reflect.DeepEqual(rb.Alerts, want[rb.Name]) {
+			t.Fatalf("%s alerts = %v, want %v", rb.Name, rb.Alerts, want[rb.Name])
+		}
+	}
+}

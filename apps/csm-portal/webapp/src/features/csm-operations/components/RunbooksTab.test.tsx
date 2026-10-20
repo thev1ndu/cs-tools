@@ -70,7 +70,9 @@ describe("RunbooksTab", () => {
     render(<RunbooksTab />);
     const row = screen.getByText("Gateway").closest("tr") as HTMLElement;
     expect(within(row).getByRole("link", { name: /Open runbook/ })).toHaveAttribute("href", "https://docs.example.com/gw");
-    expect(within(row).getByText("2 alerts")).toBeInTheDocument();
+    const count = within(row).getByText("2 alerts");
+    expect(count).toHaveAttribute("tabindex", "0");
+    expect(count).toHaveAttribute("aria-label", "2 alerts: gw-5xx, Gateway Latency High");
     expect(within(row).queryByText("gw-5xx")).not.toBeInTheDocument();
     expect(within(screen.getByText("JVM").closest("tr") as HTMLElement).getByText("1 alert")).toBeInTheDocument();
     expect(screen.getByText("2 runbooks covering 3 alerts, 1 without a link")).toBeInTheDocument();

@@ -93,7 +93,7 @@ func (r *runbookRepo) Create(ctx context.Context, actor string, req domain.SaveR
 			}
 			return err
 		}
-		if err := setRunbookAlertsTx(ctx, tx, id, req.Alerts, false); err != nil {
+		if err := setRunbookAlertsTx(ctx, tx, id, req.Alerts, nil); err != nil {
 			return err
 		}
 		rb, err := scanRunbook(tx.QueryRow(ctx, runbookSelect+` WHERE r.id = $1::uuid`, id))
@@ -118,7 +118,7 @@ func (r *runbookRepo) Update(ctx context.Context, actor, id string, req domain.S
 		if tag.RowsAffected() == 0 {
 			return nil
 		}
-		if err := setRunbookAlertsTx(ctx, tx, id, req.Alerts, false); err != nil {
+		if err := setRunbookAlertsTx(ctx, tx, id, req.Alerts, nil); err != nil {
 			return err
 		}
 		rb, err := scanRunbook(tx.QueryRow(ctx, runbookSelect+` WHERE r.id = $1::uuid`, id))
@@ -138,6 +138,10 @@ func (r *runbookRepo) Delete(ctx context.Context, id string) (bool, error) {
 
 func (r *runbookRepo) Import(ctx context.Context, actor string, reqs []domain.SaveRunbookRequest) (domain.ImportRunbooksResponse, error) {
 	var out domain.ImportRunbooksResponse
+	names := make([]string, len(reqs))
+	for i, req := range reqs {
+		names[i] = req.Name
+	}
 	err := r.inTx(ctx, "import runbooks", func(tx pgx.Tx) error {
 		for _, req := range reqs {
 			var id string
@@ -151,7 +155,7 @@ func (r *runbookRepo) Import(ctx context.Context, actor string, reqs []domain.Sa
 				req.Name, req.RunbookURL, actor).Scan(&id, &inserted); err != nil {
 				return err
 			}
-			if err := setRunbookAlertsTx(ctx, tx, id, req.Alerts, true); err != nil {
+			if err := setRunbookAlertsTx(ctx, tx, id, req.Alerts, names); err != nil {
 				return err
 			}
 			if inserted {
@@ -165,12 +169,27 @@ func (r *runbookRepo) Import(ctx context.Context, actor string, reqs []domain.Sa
 	return out, err
 }
 
-// setRunbookAlertsTx replaces a runbook's alerts; with steal an alert listed under another runbook moves here, otherwise it is a ConflictError.
-func setRunbookAlertsTx(ctx context.Context, tx pgx.Tx, id string, alerts []string, steal bool) error {
+// setRunbookAlertsTx replaces a runbook's alerts. With importNames (an import) an alert listed under another runbook moves here,
+// unless that would leave a runbook the import does not name without alerts; without it a taken alert is a ConflictError.
+func setRunbookAlertsTx(ctx context.Context, tx pgx.Tx, id string, alerts []string, importNames []string) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM runbook_alert WHERE runbook_id = $1::uuid`, id); err != nil {
 		return err
 	}
-	if steal {
+	if importNames != nil {
+		var emptied string
+		err := tx.QueryRow(ctx,
+			`SELECT r.name FROM runbook_alert a JOIN runbook r ON r.id = a.runbook_id
+			 WHERE lower(btrim(r.name)) <> ALL($2::text[])
+			 GROUP BY r.id, r.name
+			 HAVING count(*) = count(*) FILTER (WHERE lower(btrim(a.alert_name)) = ANY($1::text[]))
+			 ORDER BY lower(r.name) LIMIT 1`,
+			lowerAll(alerts), lowerAll(importNames)).Scan(&emptied)
+		if err == nil {
+			return &apierror.ConflictError{Msg: "importing would leave runbook " + emptied + " without alerts"}
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM runbook_alert WHERE lower(btrim(alert_name)) = ANY($1::text[])`, lowerAll(alerts)); err != nil {
 			return err
 		}

@@ -466,7 +466,13 @@ function AlertCount({ alerts }: { alerts: string[] }): JSX.Element {
   const label = `${alerts.length} ${alerts.length === 1 ? "alert" : "alerts"}`;
   return (
     <Tooltip title={alerts.join(", ")}>
-      <Typography variant="body2" component="span" sx={{ cursor: "default" }}>
+      <Typography
+        variant="body2"
+        component="span"
+        tabIndex={0}
+        aria-label={`${label}: ${alerts.join(", ")}`}
+        sx={{ cursor: "default" }}
+      >
         {label}
       </Typography>
     </Tooltip>

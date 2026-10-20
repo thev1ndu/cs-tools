@@ -9384,7 +9384,9 @@ paths:
         surrounding spaces) replaces that runbook's link and alerts; an alert
         listed under another runbook moves to the entry naming it. Within the
         request, a later entry wins over an earlier one with the same name or
-        alert. At most 5000 entries.
+        alert. Nothing is written when this would leave a runbook without
+        alerts: 400 for an entry of the request, 409 for a runbook the import
+        does not name. At most 5000 entries.
       operationId: importRunbooks
       requestBody:
         required: true

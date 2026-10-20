@@ -93,3 +93,15 @@ func TestRunbookImport_LaterEntriesWin(t *testing.T) {
 		t.Fatalf("imported %+v, want %+v", repo.imported, want)
 	}
 }
+
+func TestRunbookImport_RefusesAnEntryLeftWithoutAlerts(t *testing.T) {
+	repo := &recordingRunbookRepo{}
+	_, err := NewRunbookService(repo).Import(context.Background(), domain.ImportRunbooksRequest{Runbooks: []domain.SaveRunbookRequest{
+		{Name: "A", Alerts: []string{"x"}},
+		{Name: "B", Alerts: []string{"X"}},
+	}})
+	var ve *apierror.ValidationError
+	if !errors.As(err, &ve) || repo.imported != nil {
+		t.Fatalf("err = %v, imported = %v; want a ValidationError and nothing imported", err, repo.imported)
+	}
+}
