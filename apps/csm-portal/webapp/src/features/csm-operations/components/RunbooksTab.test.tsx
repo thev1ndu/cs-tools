@@ -66,12 +66,13 @@ describe("RunbooksTab", () => {
     mocks.update.mockReset();
   });
 
-  it("lists each runbook with its name, link and alerts", () => {
+  it("lists each runbook with its name, link and alert count", () => {
     render(<RunbooksTab />);
     const row = screen.getByText("Gateway").closest("tr") as HTMLElement;
     expect(within(row).getByRole("link", { name: /Open runbook/ })).toHaveAttribute("href", "https://docs.example.com/gw");
-    expect(within(row).getByText("gw-5xx")).toBeInTheDocument();
-    expect(within(row).getByText("Gateway Latency High")).toBeInTheDocument();
+    expect(within(row).getByText("2 alerts")).toBeInTheDocument();
+    expect(within(row).queryByText("gw-5xx")).not.toBeInTheDocument();
+    expect(within(screen.getByText("JVM").closest("tr") as HTMLElement).getByText("1 alert")).toBeInTheDocument();
     expect(screen.getByText("2 runbooks covering 3 alerts, 1 without a link")).toBeInTheDocument();
   });
 

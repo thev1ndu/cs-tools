@@ -70,7 +70,6 @@ import {
 } from "@features/csm-operations/utils/runbooks";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
-const VISIBLE_ALERT_CHIPS = 5;
 // A Select treats "" as no selection and leaves its label inside the box, so "Anyone" needs a real value.
 const ANY_EDITOR = "__anyone__";
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
@@ -334,9 +333,9 @@ export default function RunbooksTab(): JSX.Element {
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
               <TableRow sx={{ bgcolor: "action.hover" }}>
-                <TableCell sx={{ width: 260 }}>Name</TableCell>
+                <TableCell>Name</TableCell>
                 <TableCell sx={{ width: 180 }}>Runbook</TableCell>
-                <TableCell>Alerts</TableCell>
+                <TableCell sx={{ width: 120 }}>Alerts</TableCell>
                 {canWrite && <TableCell align="right" sx={{ width: 96 }}>Actions</TableCell>}
               </TableRow>
             </TableHead>
@@ -386,7 +385,7 @@ export default function RunbooksTab(): JSX.Element {
                       )}
                     </TableCell>
                     <TableCell>
-                      <AlertChips alerts={rb.alerts} />
+                      <AlertCount alerts={rb.alerts} />
                     </TableCell>
                     {canWrite && (
                       <TableCell align="right">
@@ -463,20 +462,14 @@ interface RunbookDialogProps {
   onClose: () => void;
 }
 
-function AlertChips({ alerts }: { alerts: string[] }): JSX.Element {
-  const shown = alerts.slice(0, VISIBLE_ALERT_CHIPS);
-  const hidden = alerts.slice(VISIBLE_ALERT_CHIPS);
+function AlertCount({ alerts }: { alerts: string[] }): JSX.Element {
+  const label = `${alerts.length} ${alerts.length === 1 ? "alert" : "alerts"}`;
   return (
-    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-      {shown.map((a) => (
-        <Chip key={a} size="small" variant="outlined" label={a} sx={{ maxWidth: "100%" }} />
-      ))}
-      {hidden.length > 0 && (
-        <Tooltip title={hidden.join(", ")}>
-          <Chip size="small" label={`+${hidden.length} more`} />
-        </Tooltip>
-      )}
-    </Box>
+    <Tooltip title={alerts.join(", ")}>
+      <Typography variant="body2" component="span" sx={{ cursor: "default" }}>
+        {label}
+      </Typography>
+    </Tooltip>
   );
 }
 
