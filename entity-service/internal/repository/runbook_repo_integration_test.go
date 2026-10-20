@@ -210,3 +210,65 @@ func TestRunbookIntegration_ImportNeverEmptiesARunbookItDoesNotName(t *testing.T
 		}
 	}
 }
+
+func TestRunbookIntegration_MergeAndUnmerge(t *testing.T) {
+	ctx := context.Background()
+	repo := repository.NewRunbookRepository(runbookTestPool(t, ""))
+	mk := func(name string, alerts ...string) domain.Runbook {
+		rb, err := repo.Create(ctx, "a@x", domain.SaveRunbookRequest{Name: name, Alerts: alerts})
+		if err != nil {
+			t.Fatalf("Create %s: %v", name, err)
+		}
+		return rb
+	}
+	a := mk("gw-5xx", "gw-5xx")
+	b := mk("gw-latency", "gw-latency")
+	c := mk("gw-timeout", "gw-timeout", "gw-reset")
+	other := mk("Disk", "disk-low")
+
+	merged, err := repo.Merge(ctx, "m@x", []string{a.ID, b.ID, c.ID}, "Gateway", strp("https://d/gw"))
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if merged.ID != a.ID || merged.Name != "Gateway" || merged.RunbookURL == nil ||
+		!reflect.DeepEqual(merged.Alerts, []string{"gw-5xx", "gw-latency", "gw-reset", "gw-timeout"}) {
+		t.Fatalf("merged = %+v", merged)
+	}
+	if got, _ := repo.List(ctx); len(got) != 2 {
+		t.Fatalf("the merged runbooks must be removed, got %+v", got)
+	}
+
+	mk("Keep", "keep-alert")
+	if _, err := repo.Merge(ctx, "m@x", []string{a.ID, other.ID}, "KEEP", nil); !isConflict(err) {
+		t.Fatalf("merging into a name a runbook outside the merge keeps: err = %v, want a conflict", err)
+	}
+	if got, _ := repo.List(ctx); len(got) != 3 {
+		t.Fatalf("a refused merge must change nothing, got %+v", got)
+	}
+	if missing, err := repo.Merge(ctx, "m@x", []string{a.ID, b.ID}, "X", nil); err != nil || missing != nil {
+		t.Fatalf("merging a removed runbook = %v, %v; want nil, nil", missing, err)
+	}
+
+	split, err := repo.Unmerge(ctx, "u@x", a.ID, []string{"GW-LATENCY", "gw-reset"})
+	if err != nil {
+		t.Fatalf("Unmerge: %v", err)
+	}
+	if len(split) != 3 || split[0].ID != a.ID || !reflect.DeepEqual(split[0].Alerts, []string{"gw-5xx", "gw-timeout"}) {
+		t.Fatalf("unmerged = %+v", split)
+	}
+	for _, rb := range split[1:] {
+		if rb.RunbookURL == nil || *rb.RunbookURL != "https://d/gw" || len(rb.Alerts) != 1 || rb.Alerts[0] != rb.Name {
+			t.Fatalf("a split alert must become its own runbook with the same link, got %+v", rb)
+		}
+	}
+
+	for name, alerts := range map[string][]string{"not its alert": {"disk-low"}, "every alert": {"gw-5xx", "gw-timeout"}} {
+		var ve *apierror.ValidationError
+		if _, err := repo.Unmerge(ctx, "u@x", a.ID, alerts); !errors.As(err, &ve) {
+			t.Fatalf("%s: err = %v, want a ValidationError", name, err)
+		}
+	}
+	if missing, err := repo.Unmerge(ctx, "u@x", b.ID, []string{"gw-latency"}); err != nil || missing != nil {
+		t.Fatalf("unmerging from a removed runbook = %v, %v; want nil, nil", missing, err)
+	}
+}

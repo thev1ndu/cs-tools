@@ -105,3 +105,26 @@ func TestRunbookImport_RefusesAnEntryLeftWithoutAlerts(t *testing.T) {
 		t.Fatalf("err = %v, imported = %v; want a ValidationError and nothing imported", err, repo.imported)
 	}
 }
+
+func TestRunbookMergeAndUnmerge_Refusals(t *testing.T) {
+	svc := NewRunbookService(&recordingRunbookRepo{})
+	id := "11111111-1111-4111-8111-111111111111"
+	for name, req := range map[string]domain.MergeRunbooksRequest{
+		"one runbook":   {RunbookIDs: []string{id, " " + id + " "}, Name: "N"},
+		"not an id":     {RunbookIDs: []string{id, "nope"}, Name: "N"},
+		"no name":       {RunbookIDs: []string{id, "22222222-2222-4222-8222-222222222222"}},
+		"relative link": {RunbookIDs: []string{id, "22222222-2222-4222-8222-222222222222"}, Name: "N", RunbookURL: strp("docs")},
+	} {
+		var ve *apierror.ValidationError
+		if _, err := svc.Merge(context.Background(), req); !errors.As(err, &ve) {
+			t.Errorf("merge, %s: err = %v, want a ValidationError", name, err)
+		}
+	}
+	var ve *apierror.ValidationError
+	if _, err := svc.Unmerge(context.Background(), id, domain.UnmergeRunbookAlertsRequest{Alerts: []string{" "}}); !errors.As(err, &ve) {
+		t.Errorf("unmerge with no alert: err = %v, want a ValidationError", err)
+	}
+	if _, err := svc.Unmerge(context.Background(), "nope", domain.UnmergeRunbookAlertsRequest{Alerts: []string{"a"}}); !errors.As(err, &ve) {
+		t.Errorf("unmerge with a bad id: err = %v, want a ValidationError", err)
+	}
+}

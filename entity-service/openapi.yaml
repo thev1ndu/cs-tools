@@ -9431,6 +9431,127 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /runbooks/merge:
+    post:
+      summary: Merge runbooks into one.
+      description: >
+        One transaction. The first runbook keeps its id, takes every alert of
+        the others and is renamed and relinked as given; the others are
+        removed. The name may be one of the merged runbooks' names.
+      operationId: mergeRunbooks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeRunbooksRequest'
+      responses:
+        "200":
+          description: The merged runbook.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Runbook'
+        "400":
+          description: Fewer than two runbooks, an invalid id, name or link; nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: A runbook does not exist, or runbooks are not available on this deployment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The name belongs to a runbook outside the merge.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /runbooks/{id}/unmerge:
+    post:
+      summary: Move alerts out of a runbook into runbooks of their own.
+      description: >
+        One transaction. Each alert leaves the runbook and becomes a runbook
+        named after it (as stored), with the same link. The runbook must keep
+        at least one alert.
+      operationId: unmergeRunbookAlerts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnmergeRunbookAlertsRequest'
+      responses:
+        "200":
+          description: The runbook, followed by the new runbooks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunbookList'
+        "400":
+          description: No alert, an alert the runbook does not hold, or every alert of the runbook; nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The runbook does not exist, or runbooks are not available on this deployment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: A runbook named after one of the alerts already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /runbooks/{id}:
     put:
       summary: Change a runbook, replacing its alerts.
@@ -25564,6 +25685,33 @@ components:
           maxItems: 5000
           items:
             $ref: '#/components/schemas/SaveRunbookRequest'
+    MergeRunbooksRequest:
+      type: object
+      required: [runbookIds, name]
+      properties:
+        runbookIds:
+          type: array
+          minItems: 2
+          description: The runbook to keep first, then the runbooks merged into it.
+          items:
+            type: string
+            format: uuid
+        name:
+          type: string
+          maxLength: 1000
+        runbookUrl:
+          type: string
+          nullable: true
+          description: A full http(s) link; empty or null records that no runbook exists.
+    UnmergeRunbookAlertsRequest:
+      type: object
+      required: [alerts]
+      properties:
+        alerts:
+          type: array
+          minItems: 1
+          items:
+            type: string
     ImportRunbooksResponse:
       type: object
       required: [created, updated]

@@ -103,3 +103,31 @@ func (h *RunbookHandler) ImportRunbooks(w http.ResponseWriter, r *http.Request) 
 	}
 	writeRunbookJSON(w, http.StatusOK, resp)
 }
+
+// MergeRunbooks handles POST /runbooks/merge.
+func (h *RunbookHandler) MergeRunbooks(w http.ResponseWriter, r *http.Request) {
+	var req domain.MergeRunbooksRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	rb, err := h.svc.Merge(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeRunbookJSON(w, http.StatusOK, rb)
+}
+
+// UnmergeRunbookAlerts handles POST /runbooks/{id}/unmerge.
+func (h *RunbookHandler) UnmergeRunbookAlerts(w http.ResponseWriter, r *http.Request) {
+	var req domain.UnmergeRunbookAlertsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.Unmerge(r.Context(), r.PathValue("id"), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeRunbookJSON(w, http.StatusOK, resp)
+}

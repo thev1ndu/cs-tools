@@ -19,7 +19,9 @@ import {
   Autocomplete,
   Box,
   Button,
+  Checkbox,
   Chip,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
@@ -47,14 +49,16 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp, ExternalLink, ListFilter, Pencil, Plus, Search, Trash2, Upload, X } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useRef, useState, type ChangeEvent, type JSX } from "react";
+import { Fragment, useMemo, useRef, useState, type ChangeEvent, type JSX } from "react";
 import QueryErrorState from "@components/QueryErrorState";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import {
   useCreateRunbook,
   useDeleteRunbook,
   useImportRunbooks,
+  useMergeRunbooks,
   useRunbooks,
+  useUnmergeRunbookAlerts,
   useUpdateRunbook,
 } from "@features/csm-operations/api/useRunbooks";
 import {
@@ -102,6 +106,10 @@ export default function RunbooksTab(): JSX.Element {
   const [dialog, setDialog] = useState<RunbookDialogState>({ open: false });
   const [pendingDelete, setPendingDelete] = useState<Runbook | null>(null);
   const [notice, setNotice] = useState<{ severity: "success" | "error"; text: string } | null>(null);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [isMergeOpen, setIsMergeOpen] = useState(false);
+  const unmerge = useUnmergeRunbookAlerts();
 
   const linkedCount = runbooks.filter((r) => r.runbookUrl).length;
   const alertCount = runbooks.reduce((n, r) => n + r.alerts.length, 0);
@@ -119,6 +127,26 @@ export default function RunbooksTab(): JSX.Element {
   };
 
   const pageRows = filtered.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  // Ids of runbooks that no longer exist (merged away, deleted) drop out on their own.
+  const selected = runbooks.filter((r) => selectedIds.has(r.id));
+  const columnCount = canWrite ? 5 : 3;
+
+  const toggle = (set: ReadonlySet<string>, id: string): Set<string> => {
+    const next = new Set(set);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  };
+
+  const handleUnmerge = (rb: Runbook, alert: string): void => {
+    unmerge.mutate(
+      { id: rb.id, alerts: [alert] },
+      {
+        onSuccess: () => setNotice({ severity: "success", text: `Moved ${alert} out of ${rb.name} into a runbook of its own.` }),
+        onError: (err) => setNotice({ severity: "error", text: errorText(err, "Failed to unmerge the alert.") }),
+      },
+    );
+  };
 
   const handleDelete = (): void => {
     if (!pendingDelete) return;
@@ -328,14 +356,33 @@ export default function RunbooksTab(): JSX.Element {
         )}
       </Paper>
 
+      {canWrite && selected.length > 0 && (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+          <Typography variant="body2" color="text.secondary">
+            {selected.length} selected
+          </Typography>
+          <Tooltip title={selected.length < 2 ? "Select at least two runbooks to merge." : ""}>
+            <span>
+              <Button variant="contained" size="small" disabled={selected.length < 2} onClick={() => setIsMergeOpen(true)}>
+                Merge
+              </Button>
+            </span>
+          </Tooltip>
+          <Button variant="text" size="small" onClick={() => setSelectedIds(new Set())}>
+            Clear selection
+          </Button>
+        </Box>
+      )}
+
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
             <TableHead>
               <TableRow sx={{ bgcolor: "action.hover" }}>
+                {canWrite && <TableCell padding="checkbox" />}
+                <TableCell padding="checkbox" />
                 <TableCell>Name</TableCell>
                 <TableCell sx={{ width: 180 }}>Runbook</TableCell>
-                <TableCell sx={{ width: 120 }}>Alerts</TableCell>
                 {canWrite && <TableCell align="right" sx={{ width: 96 }}>Actions</TableCell>}
               </TableRow>
             </TableHead>
@@ -343,66 +390,104 @@ export default function RunbooksTab(): JSX.Element {
               {isLoading ? (
                 Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
+                    {canWrite && <TableCell padding="checkbox" />}
+                    <TableCell padding="checkbox" />
                     <TableCell><Skeleton variant="rounded" width="70%" height={18} /></TableCell>
                     <TableCell><Skeleton variant="rounded" width={110} height={22} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width="80%" height={22} /></TableCell>
                     {canWrite && <TableCell><Skeleton variant="rounded" width={56} height={18} /></TableCell>}
                   </TableRow>
                 ))
               ) : isError ? (
                 <TableRow>
-                  <TableCell colSpan={canWrite ? 4 : 3} align="center">
+                  <TableCell colSpan={columnCount} align="center">
                     <QueryErrorState message={errorText(error, "Failed to load runbooks.")} error={error} onRetry={() => void refetch()} />
                   </TableCell>
                 </TableRow>
               ) : pageRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={canWrite ? 4 : 3} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={columnCount} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
                       No runbooks found.
                     </Typography>
                   </TableCell>
                 </TableRow>
               ) : (
-                pageRows.map((rb) => (
-                  <TableRow key={rb.id} hover>
-                    <TableCell sx={{ wordBreak: "break-word" }}>
-                      <Typography variant="body2">{rb.name}</Typography>
-                    </TableCell>
-                    <TableCell>
-                      {rb.runbookUrl ? (
-                        <Link
-                          href={rb.runbookUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
-                        >
-                          Open runbook
-                          <ExternalLink size={14} />
-                        </Link>
-                      ) : (
-                        <Chip size="small" variant="outlined" color="warning" label="No runbook" />
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <AlertCount alerts={rb.alerts} />
-                    </TableCell>
-                    {canWrite && (
-                      <TableCell align="right">
-                        <Tooltip title="Edit">
-                          <IconButton size="small" aria-label={`Edit ${rb.name}`} onClick={() => setDialog({ open: true, editing: rb })}>
-                            <Pencil size={16} />
+                pageRows.map((rb) => {
+                  const open = expanded.has(rb.id);
+                  return (
+                    <Fragment key={rb.id}>
+                      <TableRow hover sx={open ? { "& > td": { borderBottom: 0 } } : {}}>
+                        {canWrite && (
+                          <TableCell padding="checkbox">
+                            <Checkbox
+                              size="small"
+                              checked={selectedIds.has(rb.id)}
+                              onChange={() => setSelectedIds((set) => toggle(set, rb.id))}
+                              slotProps={{ input: { "aria-label": `Select ${rb.name}` } }}
+                            />
+                          </TableCell>
+                        )}
+                        <TableCell padding="checkbox">
+                          <IconButton
+                            size="small"
+                            aria-label={`${open ? "Hide" : "Show"} the alerts of ${rb.name}`}
+                            aria-expanded={open}
+                            onClick={() => setExpanded((set) => toggle(set, rb.id))}
+                          >
+                            {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                           </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Delete">
-                          <IconButton size="small" aria-label={`Delete ${rb.name}`} onClick={() => setPendingDelete(rb)}>
-                            <Trash2 size={16} />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    )}
-                  </TableRow>
-                ))
+                        </TableCell>
+                        <TableCell sx={{ wordBreak: "break-word" }}>
+                          <Typography variant="body2">{rb.name}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {rb.alerts.length} {rb.alerts.length === 1 ? "alert" : "alerts"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          {rb.runbookUrl ? (
+                            <Link
+                              href={rb.runbookUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+                            >
+                              Open runbook
+                              <ExternalLink size={14} />
+                            </Link>
+                          ) : (
+                            <Chip size="small" variant="outlined" color="warning" label="No runbook" />
+                          )}
+                        </TableCell>
+                        {canWrite && (
+                          <TableCell align="right">
+                            <Tooltip title="Edit">
+                              <IconButton size="small" aria-label={`Edit ${rb.name}`} onClick={() => setDialog({ open: true, editing: rb })}>
+                                <Pencil size={16} />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Delete">
+                              <IconButton size="small" aria-label={`Delete ${rb.name}`} onClick={() => setPendingDelete(rb)}>
+                                <Trash2 size={16} />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        )}
+                      </TableRow>
+                      <TableRow>
+                        <TableCell colSpan={columnCount} sx={{ py: 0, ...(open ? {} : { borderBottom: 0 }) }}>
+                          <Collapse in={open} unmountOnExit>
+                            <RunbookAlertList
+                              runbook={rb}
+                              canWrite={canWrite}
+                              busy={unmerge.isPending}
+                              onUnmerge={(alert) => handleUnmerge(rb, alert)}
+                            />
+                          </Collapse>
+                        </TableCell>
+                      </TableRow>
+                    </Fragment>
+                  );
+                })
               )}
             </TableBody>
           </Table>
@@ -425,6 +510,20 @@ export default function RunbooksTab(): JSX.Element {
       </Box>
 
       <RunbookAlertSearch runbooks={runbooks} />
+
+      {isMergeOpen && selected.length >= 2 && (
+        <MergeRunbooksDialog
+          selected={selected}
+          existing={runbooks}
+          onClose={() => setIsMergeOpen(false)}
+          onMerged={(merged, count) => {
+            setIsMergeOpen(false);
+            setSelectedIds(new Set());
+            setExpanded((set) => new Set(set).add(merged.id));
+            setNotice({ severity: "success", text: `Merged ${count} runbooks into ${merged.name}.` });
+          }}
+        />
+      )}
 
       {dialog.open && (
         <RunbookDialog
@@ -462,20 +561,113 @@ interface RunbookDialogProps {
   onClose: () => void;
 }
 
-function AlertCount({ alerts }: { alerts: string[] }): JSX.Element {
-  const label = `${alerts.length} ${alerts.length === 1 ? "alert" : "alerts"}`;
+function RunbookAlertList({
+  runbook,
+  canWrite,
+  busy,
+  onUnmerge,
+}: {
+  runbook: Runbook;
+  canWrite: boolean;
+  busy: boolean;
+  onUnmerge: (alert: string) => void;
+}): JSX.Element {
+  const onlyOne = runbook.alerts.length === 1;
   return (
-    <Tooltip title={alerts.join(", ")}>
-      <Typography
-        variant="body2"
-        component="span"
-        tabIndex={0}
-        aria-label={`${label}: ${alerts.join(", ")}`}
-        sx={{ cursor: "default" }}
-      >
-        {label}
-      </Typography>
-    </Tooltip>
+    <Box
+      component="ul"
+      aria-label={`Alerts of ${runbook.name}`}
+      sx={{ listStyle: "none", m: 0, py: 1, pl: canWrite ? 13 : 7, pr: 2, display: "flex", flexDirection: "column", gap: 0.5 }}
+    >
+      {runbook.alerts.map((alert) => (
+        <Box component="li" key={alert} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
+          <Typography variant="body2" sx={{ wordBreak: "break-word", fontFamily: "monospace" }}>
+            {alert}
+          </Typography>
+          {canWrite && (
+            <Tooltip title={onlyOne ? "A runbook keeps at least one alert." : "Move this alert into a runbook of its own."}>
+              <span>
+                <Button size="small" variant="text" disabled={onlyOne || busy} onClick={() => onUnmerge(alert)} aria-label={`Unmerge ${alert}`}>
+                  Unmerge
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+function MergeRunbooksDialog({
+  selected,
+  existing,
+  onClose,
+  onMerged,
+}: {
+  selected: Runbook[];
+  existing: Runbook[];
+  onClose: () => void;
+  onMerged: (merged: Runbook, count: number) => void;
+}): JSX.Element {
+  const merge = useMergeRunbooks();
+  const [target] = selected;
+  const [name, setName] = useState(target.name);
+  const [runbookUrl, setRunbookUrl] = useState(selected.find((r) => r.runbookUrl)?.runbookUrl ?? "");
+  const trimmedName = name.trim();
+  const selectedIds = new Set(selected.map((r) => r.id));
+  const duplicateName = existing.some((r) => !selectedIds.has(r.id) && r.name.trim().toLowerCase() === trimmedName.toLowerCase());
+  const urlInvalid = !isValidRunbookUrl(runbookUrl);
+  const alertTotal = selected.reduce((n, r) => n + r.alerts.length, 0);
+  const canMerge = trimmedName.length > 0 && !duplicateName && !urlInvalid && !merge.isPending;
+
+  const handleMerge = (): void => {
+    merge.mutate(
+      { runbookIds: selected.map((r) => r.id), name: trimmedName, runbookUrl: runbookUrl.trim() || null },
+      { onSuccess: (merged) => onMerged(merged, selected.length) },
+    );
+  };
+
+  return (
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Merge {selected.length} runbooks</DialogTitle>
+      <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: "8px !important" }}>
+        <Typography variant="body2" color="text.secondary">
+          The {alertTotal} alerts of these runbooks move into one runbook, and the others are removed.
+        </Typography>
+        <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+          {selected.map((r) => (
+            <Typography component="li" variant="body2" key={r.id} sx={{ wordBreak: "break-word" }}>
+              {r.name} ({r.alerts.length} {r.alerts.length === 1 ? "alert" : "alerts"})
+            </Typography>
+          ))}
+        </Box>
+        <TextField
+          label="Name"
+          required
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          error={duplicateName}
+          helperText={duplicateName ? "Another runbook already has this name." : undefined}
+        />
+        <TextField
+          label="Runbook link"
+          placeholder="https://docs.google.com/document/d/…"
+          value={runbookUrl}
+          onChange={(e) => setRunbookUrl(e.target.value)}
+          error={urlInvalid}
+          helperText={urlInvalid ? "Enter a full http(s) link." : "Leave empty to record that no runbook exists yet."}
+        />
+        {merge.error && <Alert severity="error">{errorText(merge.error, "Failed to merge the runbooks.")}</Alert>}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" disabled={!canMerge} onClick={handleMerge}>
+          Merge
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 

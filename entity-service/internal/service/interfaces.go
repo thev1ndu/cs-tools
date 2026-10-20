@@ -137,6 +137,8 @@ type RunbookService interface {
 	Update(ctx context.Context, id string, req domain.SaveRunbookRequest) (domain.Runbook, error)
 	Delete(ctx context.Context, id string) error
 	Import(ctx context.Context, req domain.ImportRunbooksRequest) (domain.ImportRunbooksResponse, error)
+	Merge(ctx context.Context, req domain.MergeRunbooksRequest) (domain.Runbook, error)
+	Unmerge(ctx context.Context, id string, req domain.UnmergeRunbookAlertsRequest) (domain.RunbookList, error)
 }
 
 // SNUserService defines the user operations backed by the ServiceNow data source.

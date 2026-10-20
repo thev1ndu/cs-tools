@@ -24,7 +24,7 @@ vi.hoisted(() => {
   window.config = { ...window.config, CSM_PORTAL_BACKEND_BASE_URL: "http://localhost:9090" };
 });
 
-const mocks = vi.hoisted(() => ({ create: vi.fn(), update: vi.fn() }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), update: vi.fn(), merge: vi.fn(), unmerge: vi.fn() }));
 
 const catalog = [
   {
@@ -49,6 +49,8 @@ vi.mock("@features/csm-operations/api/useRunbooks", () => ({
   useUpdateRunbook: () => idleMutation(mocks.update),
   useDeleteRunbook: () => idleMutation(),
   useImportRunbooks: () => idleMutation(),
+  useMergeRunbooks: () => idleMutation(mocks.merge),
+  useUnmergeRunbookAlerts: () => idleMutation(mocks.unmerge),
 }));
 
 function type(el: HTMLElement, value: string): void {
@@ -64,16 +66,17 @@ describe("RunbooksTab", () => {
   beforeEach(() => {
     mocks.create.mockReset();
     mocks.update.mockReset();
+    mocks.merge.mockReset();
+    mocks.unmerge.mockReset();
   });
 
   it("lists each runbook with its name, link and alert count", () => {
     render(<RunbooksTab />);
     const row = screen.getByText("Gateway").closest("tr") as HTMLElement;
     expect(within(row).getByRole("link", { name: /Open runbook/ })).toHaveAttribute("href", "https://docs.example.com/gw");
-    const count = within(row).getByText("2 alerts");
-    expect(count).toHaveAttribute("tabindex", "0");
-    expect(count).toHaveAttribute("aria-label", "2 alerts: gw-5xx, Gateway Latency High");
-    expect(within(row).queryByText("gw-5xx")).not.toBeInTheDocument();
+    expect(within(row).getByText("2 alerts")).toBeInTheDocument();
+    expect(screen.queryByText("gw-5xx")).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Alerts" })).not.toBeInTheDocument();
     expect(within(screen.getByText("JVM").closest("tr") as HTMLElement).getByText("1 alert")).toBeInTheDocument();
     expect(screen.getByText("2 runbooks covering 3 alerts, 1 without a link")).toBeInTheDocument();
   });
@@ -115,6 +118,45 @@ describe("RunbooksTab", () => {
         id: "1",
         input: { name: "Gateway", runbookUrl: "https://docs.example.com/gw", alerts: ["gw-5xx", "Gateway Latency High", "gw-timeout"] },
       },
+      expect.anything(),
+    );
+  });
+
+  it("expands a row to list its alerts, and unmerges one into a runbook of its own", () => {
+    render(<RunbooksTab />);
+    const toggle = screen.getByRole("button", { name: "Show the alerts of Gateway" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Hide the alerts of Gateway" })).toHaveAttribute("aria-expanded", "true");
+    const list = screen.getByRole("list", { name: "Alerts of Gateway" });
+    expect(within(list).getByText("gw-5xx")).toBeInTheDocument();
+    expect(within(list).getByText("Gateway Latency High")).toBeInTheDocument();
+
+    fireEvent.click(within(list).getByRole("button", { name: "Unmerge gw-5xx" }));
+    expect(mocks.unmerge).toHaveBeenCalledWith({ id: "1", alerts: ["gw-5xx"] }, expect.anything());
+  });
+
+  it("does not unmerge a runbook's only alert", () => {
+    render(<RunbooksTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Show the alerts of JVM" }));
+    expect(screen.getByRole("button", { name: "Unmerge JVM Heap" })).toBeDisabled();
+  });
+
+  it("merges the selected runbooks into one, named and linked in the dialog", () => {
+    render(<RunbooksTab />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select JVM" }));
+    expect(screen.getByRole("button", { name: "Merge" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Gateway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Merge 2 runbooks")).toBeInTheDocument();
+    expect(within(dialog).getByText(/The 3 alerts of these runbooks move into one runbook/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/^Runbook link/)).toHaveValue("https://docs.example.com/gw");
+    type(within(dialog).getByLabelText(/^Name/), "Platform");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Merge" }));
+    expect(mocks.merge).toHaveBeenCalledWith(
+      { runbookIds: ["1", "2"], name: "Platform", runbookUrl: "https://docs.example.com/gw" },
       expect.anything(),
     );
   });

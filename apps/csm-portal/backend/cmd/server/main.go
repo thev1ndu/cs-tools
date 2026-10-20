@@ -670,6 +670,8 @@ func main() {
 	route("GET /runbooks", handler.PermViewOperations, runbookHandler.ListRunbooks)
 	route("POST /runbooks", handler.PermWrite, runbookHandler.CreateRunbook)
 	route("POST /runbooks/import", handler.PermWrite, runbookHandler.ImportRunbooks)
+	route("POST /runbooks/merge", handler.PermWrite, runbookHandler.MergeRunbooks)
+	route("POST /runbooks/{id}/unmerge", handler.PermWrite, runbookHandler.UnmergeRunbookAlerts)
 	route("PUT /runbooks/{id}", handler.PermWrite, runbookHandler.UpdateRunbook)
 	route("DELETE /runbooks/{id}", handler.PermWrite, runbookHandler.DeleteRunbook)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
