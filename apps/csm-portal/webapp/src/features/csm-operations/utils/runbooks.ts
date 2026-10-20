@@ -34,6 +34,50 @@ export interface RunbookInput {
 }
 
 export type RunbookCoverage = "all" | "linked" | "missing";
+export type RunbookAlertCount = "all" | "single" | "multiple";
+export type RunbookUpdatedWithin = "all" | "7" | "30" | "90";
+
+export interface RunbookFilters {
+  coverage: RunbookCoverage;
+  alertCount: RunbookAlertCount;
+  /** "" for anyone. */
+  updatedBy: string;
+  updatedWithin: RunbookUpdatedWithin;
+}
+
+export const DEFAULT_RUNBOOK_FILTERS: RunbookFilters = { coverage: "all", alertCount: "all", updatedBy: "", updatedWithin: "all" };
+
+/** How many filters differ from their default. */
+export function activeRunbookFilterCount(filters: RunbookFilters): number {
+  return (Object.keys(DEFAULT_RUNBOOK_FILTERS) as (keyof RunbookFilters)[]).filter(
+    (k) => filters[k] !== DEFAULT_RUNBOOK_FILTERS[k],
+  ).length;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The runbooks matching the search text (name, alert name or link) and every filter. */
+export function filterRunbooks(runbooks: Runbook[], search: string, filters: RunbookFilters, now = Date.now()): Runbook[] {
+  const term = search.trim().toLowerCase();
+  const since = filters.updatedWithin === "all" ? undefined : now - Number(filters.updatedWithin) * DAY_MS;
+  return runbooks.filter((r) => {
+    if (filters.coverage === "linked" && !r.runbookUrl) return false;
+    if (filters.coverage === "missing" && r.runbookUrl) return false;
+    if (filters.alertCount === "single" && r.alerts.length !== 1) return false;
+    if (filters.alertCount === "multiple" && r.alerts.length < 2) return false;
+    if (filters.updatedBy && r.updatedBy !== filters.updatedBy) return false;
+    if (since !== undefined) {
+      const updated = Date.parse(r.updatedOn);
+      if (Number.isNaN(updated) || updated < since) return false;
+    }
+    return (
+      !term ||
+      r.name.toLowerCase().includes(term) ||
+      r.alerts.some((a) => a.toLowerCase().includes(term)) ||
+      (r.runbookUrl ?? "").toLowerCase().includes(term)
+    );
+  });
+}
 
 export function isValidRunbookUrl(value: string): boolean {
   if (!value.trim()) return true;

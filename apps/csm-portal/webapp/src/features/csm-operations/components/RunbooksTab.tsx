@@ -58,12 +58,15 @@ import {
   useUpdateRunbook,
 } from "@features/csm-operations/api/useRunbooks";
 import {
+  activeRunbookFilterCount,
   cleanAlertNames,
+  DEFAULT_RUNBOOK_FILTERS,
+  filterRunbooks,
   findRunbookForIncident,
   isValidRunbookUrl,
   parseRunbookImport,
   type Runbook,
-  type RunbookCoverage,
+  type RunbookFilters,
 } from "@features/csm-operations/utils/runbooks";
 
 const DEFAULT_ROWS_PER_PAGE = 20;
@@ -91,7 +94,7 @@ export default function RunbooksTab(): JSX.Element {
   const importRunbooks = useImportRunbooks();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
-  const [coverage, setCoverage] = useState<RunbookCoverage>("all");
+  const [filters, setFilters] = useState<RunbookFilters>(DEFAULT_RUNBOOK_FILTERS);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
@@ -102,19 +105,17 @@ export default function RunbooksTab(): JSX.Element {
   const linkedCount = runbooks.filter((r) => r.runbookUrl).length;
   const alertCount = runbooks.reduce((n, r) => n + r.alerts.length, 0);
 
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return runbooks.filter((r) => {
-      if (coverage === "linked" && !r.runbookUrl) return false;
-      if (coverage === "missing" && r.runbookUrl) return false;
-      return (
-        !term ||
-        r.name.toLowerCase().includes(term) ||
-        r.alerts.some((a) => a.toLowerCase().includes(term)) ||
-        (r.runbookUrl ?? "").toLowerCase().includes(term)
-      );
-    });
-  }, [runbooks, search, coverage]);
+  const filtered = useMemo(() => filterRunbooks(runbooks, search, filters), [runbooks, search, filters]);
+  const activeFilters = activeRunbookFilterCount(filters);
+  const editors = useMemo(
+    () => [...new Set(runbooks.map((r) => r.updatedBy).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [runbooks],
+  );
+
+  const setFilter = <K extends keyof RunbookFilters>(key: K, value: RunbookFilters[K]): void => {
+    setFilters((f) => ({ ...f, [key]: value }));
+    setPage(0);
+  };
 
   const pageRows = filtered.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
 
@@ -231,15 +232,15 @@ export default function RunbooksTab(): JSX.Element {
             startIcon={<ListFilter size={16} />}
             endIcon={isFiltersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           >
-            {coverage !== "all" ? "Filters (1)" : "Filters"}
+            {activeFilters > 0 ? `Filters (${activeFilters})` : "Filters"}
           </Button>
-          {coverage !== "all" && (
+          {activeFilters > 0 && (
             <Button
               variant="text"
               size="small"
               color="primary"
               onClick={() => {
-                setCoverage("all");
+                setFilters(DEFAULT_RUNBOOK_FILTERS);
                 setPage(0);
               }}
               startIcon={<X size={16} />}
@@ -255,20 +256,69 @@ export default function RunbooksTab(): JSX.Element {
             <Grid container spacing={2} alignItems="center">
               <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                 <FormControl fullWidth size="small">
-                  <InputLabel id="runbook-filter-coverage-label">Runbook</InputLabel>
+                  <InputLabel id="runbook-filter-coverage-label">Runbook link</InputLabel>
                   <Select
                     labelId="runbook-filter-coverage-label"
                     id="runbook-filter-coverage"
-                    label="Runbook"
-                    value={coverage}
-                    onChange={(e) => {
-                      setCoverage(e.target.value as RunbookCoverage);
-                      setPage(0);
-                    }}
+                    label="Runbook link"
+                    value={filters.coverage}
+                    onChange={(e) => setFilter("coverage", e.target.value as RunbookFilters["coverage"])}
                   >
                     <MenuItem value="all">All</MenuItem>
-                    <MenuItem value="linked">With runbook</MenuItem>
-                    <MenuItem value="missing">No runbook</MenuItem>
+                    <MenuItem value="linked">Has a link</MenuItem>
+                    <MenuItem value="missing">No link yet</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <FormControl fullWidth size="small">
+                  <InputLabel id="runbook-filter-alerts-label">Alerts</InputLabel>
+                  <Select
+                    labelId="runbook-filter-alerts-label"
+                    id="runbook-filter-alerts"
+                    label="Alerts"
+                    value={filters.alertCount}
+                    onChange={(e) => setFilter("alertCount", e.target.value as RunbookFilters["alertCount"])}
+                  >
+                    <MenuItem value="all">All</MenuItem>
+                    <MenuItem value="single">One alert</MenuItem>
+                    <MenuItem value="multiple">Several alerts</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <FormControl fullWidth size="small">
+                  <InputLabel id="runbook-filter-updated-by-label">Last updated by</InputLabel>
+                  <Select
+                    labelId="runbook-filter-updated-by-label"
+                    id="runbook-filter-updated-by"
+                    label="Last updated by"
+                    value={filters.updatedBy}
+                    onChange={(e) => setFilter("updatedBy", e.target.value)}
+                  >
+                    <MenuItem value="">Anyone</MenuItem>
+                    {editors.map((who) => (
+                      <MenuItem key={who} value={who}>
+                        {who}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <FormControl fullWidth size="small">
+                  <InputLabel id="runbook-filter-updated-within-label">Last updated</InputLabel>
+                  <Select
+                    labelId="runbook-filter-updated-within-label"
+                    id="runbook-filter-updated-within"
+                    label="Last updated"
+                    value={filters.updatedWithin}
+                    onChange={(e) => setFilter("updatedWithin", e.target.value as RunbookFilters["updatedWithin"])}
+                  >
+                    <MenuItem value="all">Any time</MenuItem>
+                    <MenuItem value="7">Past 7 days</MenuItem>
+                    <MenuItem value="30">Past 30 days</MenuItem>
+                    <MenuItem value="90">Past 90 days</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
