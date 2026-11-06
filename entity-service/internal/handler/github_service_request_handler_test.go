@@ -28,6 +28,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
+// fakeGithubSeveritySync records the severity call the handler makes.
 type fakeGithubSeveritySync struct {
 	service.GithubSyncService
 	owner, repository string
@@ -36,12 +37,14 @@ type fakeGithubSeveritySync struct {
 	calls             int
 }
 
+// SetServiceRequestSeverityFromIssue records the call and reports success.
 func (f *fakeGithubSeveritySync) SetServiceRequestSeverityFromIssue(_ context.Context, owner, repository string, issueNumber int, severity domain.CaseSeverity) (domain.SetIssueSeverityResponse, error) {
 	f.calls++
 	f.owner, f.repository, f.issueNumber, f.severity = owner, repository, issueNumber, severity
 	return domain.SetIssueSeverityResponse{Message: "severity set", ID: "sr-1", Severity: severity}, nil
 }
 
+// severityRequest is a PUT .../severity request, authenticated as clientID when set.
 func severityRequest(clientID, issueNumber, body string) *http.Request {
 	req := httptest.NewRequest(http.MethodPut, "/github/service-requests/wso2/choreo/"+issueNumber+"/severity", strings.NewReader(body))
 	req.SetPathValue("owner", "wso2")

@@ -291,10 +291,13 @@ type githubSeveritySetter interface {
 func WithGithubSeverity(svc GithubSyncService, cases CaseService) GithubSyncService {
 	s, ok := svc.(*githubSyncService)
 	if !ok {
+		slog.Warn("github: severity sync not wired; the sync service is not the Postgres one")
 		return svc
 	}
 	if m, ok := cases.(githubSeveritySetter); ok {
 		s.severities = m
+	} else {
+		slog.Warn("github: severity sync not wired; the case service cannot set a service request's severity")
 	}
 	return svc
 }

@@ -25,18 +25,21 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
+// recordingSeveritySetter records the severity the sync asks the case service to set.
 type recordingSeveritySetter struct {
 	id       string
 	severity domain.CaseSeverity
 	calls    int
 }
 
+// SetServiceRequestSeverity records the call and echoes the severity back.
 func (r *recordingSeveritySetter) SetServiceRequestSeverity(_ context.Context, id string, severity domain.CaseSeverity) (domain.UpdateCaseResponse, error) {
 	r.calls++
 	r.id, r.severity = id, severity
 	return domain.UpdateCaseResponse{Case: domain.UpdatedCase{ID: id, Severity: &severity}}, nil
 }
 
+// severitySvc is the writing sync service with setter as its case service.
 func severitySvc(r *fakeGhRepo, setter *recordingSeveritySetter) GithubSyncService {
 	svc := writingSvc(r, &fakeGhMutations{}, &fakeGhClient{})
 	svc.(*githubSyncService).severities = setter
