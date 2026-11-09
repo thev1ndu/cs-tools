@@ -1,0 +1,46 @@
+subscription_id = "00000000-0000-0000-0000-000000000000"
+location        = "eastus2"
+name            = "csm-alerting-prod"
+
+tags = {
+  product     = "csm"
+  component   = "alerting-proxy"
+  environment = "prod"
+}
+
+# Decision D1: tier per source route. Trigger and resolve of a source always share a queue.
+sources = {
+  aws           = { tier = "high" }
+  azure         = { tier = "high" }
+  gcp           = { tier = "high" }
+  site24x7      = { tier = "high" }
+  datadog       = { tier = "normal" }
+  prometheus    = { tier = "normal" }
+  icinga        = { tier = "normal" }
+  elasticsearch = { tier = "normal" }
+  opensearch    = { tier = "normal" }
+  openobserve   = { tier = "normal" }
+}
+
+# Decision D12: Premium is the tier with zone redundancy; Developer_1 is enough for a non-production stack.
+apim_sku_name        = "Premium_2"
+apim_zones           = ["1", "2"]
+apim_publisher_name  = "WSO2 SRE"
+apim_publisher_email = "sre@example.com"
+
+servicebus_capacity = 1
+
+# Copy from https://www.cloudflare.com/ips-v4 at apply time.
+cloudflare_ip_ranges = [
+  "173.245.48.0/20",
+  "103.21.244.0/22",
+]
+
+# Object ID of the identity CSM Alert Core authenticates as.
+consumer_principal_ids = ["00000000-0000-0000-0000-000000000000"]
+consumer_ip_ranges     = ["203.0.113.0/28"]
+operator_ip_ranges     = ["198.51.100.10"]
+
+alert_email_receivers = [
+  { name = "sre", email_address = "sre@example.com" },
+]

@@ -1,0 +1,20 @@
+<policies>
+  <inbound>
+    <base />
+    <!-- Only Cloudflare may reach the gateway; everything else gets 403. -->
+    <ip-filter action="allow">
+%{ for r in address_ranges ~}
+      <address-range from="${r.from}" to="${r.to}" />
+%{ endfor ~}
+    </ip-filter>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

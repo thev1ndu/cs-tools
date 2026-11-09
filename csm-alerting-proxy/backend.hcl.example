@@ -1,0 +1,5 @@
+resource_group_name  = "rg-terraform-state"
+storage_account_name = "sttfstate"
+container_name       = "tfstate"
+key                  = "csm-alerting-proxy/prod.tfstate"
+use_azuread_auth     = true
