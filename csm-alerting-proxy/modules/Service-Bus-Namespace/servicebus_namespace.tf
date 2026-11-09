@@ -19,18 +19,20 @@ resource "azurerm_servicebus_namespace" "servicebus_namespace" {
   location                      = var.location
   resource_group_name           = var.resource_group_name
   sku                           = var.sku
-  capacity                      = var.sku == "Premium" ? var.capacity : 0
-  premium_messaging_partitions  = var.sku == "Premium" ? var.premium_messaging_partitions : null
+  capacity                      = var.capacity
+  premium_messaging_partitions  = var.premium_messaging_partitions
   local_auth_enabled            = var.local_auth_enabled
   public_network_access_enabled = var.public_network_access_enabled
   minimum_tls_version           = "1.2"
   tags                          = var.tags
 
-  network_rule_set {
-    default_action                = var.network_default_action
-    public_network_access_enabled = var.public_network_access_enabled
-    # The trusted-services bypass exists only on the Premium SKU.
-    trusted_services_allowed = var.sku == "Premium" ? var.network_trusted_services_allowed : false
-    ip_rules                 = var.network_ip_rules
+  dynamic "network_rule_set" {
+    for_each = var.network_rules_enabled ? [1] : []
+    content {
+      default_action                = var.network_default_action
+      public_network_access_enabled = var.public_network_access_enabled
+      trusted_services_allowed      = var.network_trusted_services_allowed
+      ip_rules                      = var.network_ip_rules
+    }
   }
 }

@@ -21,17 +21,12 @@ output "gateway_url" {
 
 output "ingest_urls" {
   description = "Per-source ingest URL on the gateway host; sources use the same path on alerts.wso2.com"
-  value       = { for s in keys(var.sources) : s => "${module.api_management.gateway_url}/${local.api_path}/${s}" }
+  value       = { for s in var.sources : s => "${module.api_management.gateway_url}/${local.api_path}/${s}" }
 }
 
 output "source_credential_secret_names" {
-  description = "Key Vault secrets per source: the password secret and the username secret, so sources are provisioned entirely from the vault"
-  value = {
-    for s in keys(var.sources) : s => {
-      username = "alerts-source-${s}-username"
-      password = "alerts-source-${s}"
-    }
-  }
+  description = "Key Vault secret per source holding the password; the username is the source name, or the shared_credential username in dev"
+  value       = { for s in var.sources : s => "alerts-source-${s}" }
 }
 
 output "key_vault_name" {

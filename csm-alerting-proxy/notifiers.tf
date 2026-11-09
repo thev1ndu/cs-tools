@@ -23,6 +23,17 @@ locals {
     audience = "https://servicebus.azure.net"
   }
 
+  # Chat card text is HTML, so workflow values are escaped before they are shown.
+  html_escape = "replace(replace(replace(%s, '&', '&amp;'), '<', '&lt;'), '>', '&gt;')"
+
+  # Custom properties come back JSON-quoted from the peek, so the quotes are stripped for the card.
+  dlq_card_property = {
+    for tier in keys(local.queues) : tier => {
+      for p in ["source", "service", "received_at", "DeadLetterReason", "DeadLetterErrorDescription"] :
+      p => "@{${format(local.html_escape, "replace(coalesce(outputs('peek-${tier}')['headers']?['${p}'], 'unknown'), '\"', '')")}}"
+    }
+  }
+
   dlq_drain_actions = {
     for tier, queue in local.queues : tier => {
       type       = "Until"
@@ -57,6 +68,7 @@ locals {
                   "Content-Type"               = "@{coalesce(outputs('peek-${tier}')['headers']?['Content-Type'], 'application/octet-stream')}"
                   "BrokerProperties"           = "@{string(setProperty(json('{}'), 'MessageId', json(outputs('peek-${tier}')['headers']['BrokerProperties'])['MessageId']))}"
                   "source"                     = "@{coalesce(outputs('peek-${tier}')['headers']?['source'], '\"unknown\"')}"
+                  "service"                    = "@{coalesce(outputs('peek-${tier}')['headers']?['service'], '\"unknown\"')}"
                   "tier"                       = "\"${tier}\""
                   "received_at"                = "@{coalesce(outputs('peek-${tier}')['headers']?['received_at'], '\"unknown\"')}"
                   "DeadLetterReason"           = "@{coalesce(outputs('peek-${tier}')['headers']?['DeadLetterReason'], '\"unknown\"')}"
@@ -75,18 +87,44 @@ locals {
                 uri     = "@{body('${module.dlq_notifier_get_webhook.name}')['value']}"
                 headers = { "Content-Type" = "application/json; charset=UTF-8" }
                 body = {
-                  text = join("\n", [
-                    "*Alert dead-lettered* (${tier} tier, queue ${queue})",
-                    "Source: @{outputs('peek-${tier}')['headers']?['source']}",
-                    "Reason: @{outputs('peek-${tier}')['headers']?['DeadLetterReason']}",
-                    "Detail: @{outputs('peek-${tier}')['headers']?['DeadLetterErrorDescription']}",
-                    "Deliveries: @{json(outputs('peek-${tier}')['headers']['BrokerProperties'])?['DeliveryCount']}",
-                    "Message id: @{json(outputs('peek-${tier}')['headers']['BrokerProperties'])?['MessageId']}",
-                    "Received at gateway: @{outputs('peek-${tier}')['headers']?['received_at']}",
-                    "Enqueued: @{json(outputs('peek-${tier}')['headers']['BrokerProperties'])?['EnqueuedTimeUtc']}",
-                    "A copy is kept in ${local.dead_letter_archive_queue} for 30 days.",
-                    "```@{substring(string(body('peek-${tier}')), 0, min(length(string(body('peek-${tier}'))), 1500))}```",
-                  ])
+                  cardsV2 = [{
+                    cardId = "dlq-${tier}"
+                    card = {
+                      header = {
+                        title    = "DEAD-LETTERED | ${title(tier)} Priority Alert"
+                        subtitle = "#@{json(outputs('peek-${tier}')['headers']['BrokerProperties'])?['MessageId']} | @{replace(coalesce(outputs('peek-${tier}')['headers']?['service'], 'unknown'), '\"', '')} | @{replace(coalesce(outputs('peek-${tier}')['headers']?['source'], 'unknown'), '\"', '')}"
+                      }
+                      sections = [
+                        {
+                          widgets = [
+                            { textParagraph = { text = "<b>Short Description:</b><br>${local.dlq_card_property[tier]["DeadLetterReason"]}: ${local.dlq_card_property[tier]["DeadLetterErrorDescription"]}" } },
+                            { buttonList = { buttons = [{ text = "View Archive", onClick = { openLink = { url = "https://portal.azure.com/#resource${module.dead_letter_archive_queue.id}" } } }] } },
+                          ]
+                        },
+                        {
+                          header                    = "Dead-letter Details"
+                          collapsible               = true
+                          uncollapsibleWidgetsCount = 1
+                          widgets = [
+                            {
+                              textParagraph = {
+                                text = join("<br>", [
+                                  "<b>Service:</b> ${local.dlq_card_property[tier]["service"]}",
+                                  "<b>Source:</b> ${local.dlq_card_property[tier]["source"]}",
+                                  "<b>Priority:</b> ${title(tier)}",
+                                  "<b>Deliveries:</b> @{json(outputs('peek-${tier}')['headers']['BrokerProperties'])?['DeliveryCount']}",
+                                  "<b>Received at gateway:</b> ${local.dlq_card_property[tier]["received_at"]}",
+                                  "<b>Enqueued:</b> @{json(outputs('peek-${tier}')['headers']['BrokerProperties'])?['EnqueuedTimeUtc']}",
+                                  "<b>Archive:</b> copy kept in ${local.dead_letter_archive_queue} for ${local.dead_letter_archive_days} days",
+                                ])
+                              }
+                            },
+                            { textParagraph = { text = "<b>Payload (first 1500 characters):</b><br>@{${format(local.html_escape, "substring(string(body('peek-${tier}')), 0, min(length(string(body('peek-${tier}'))), 1500))")}}" } },
+                          ]
+                        },
+                      ]
+                    }
+                  }]
                 }
               }
               runtimeConfiguration = { secureData = { properties = ["inputs"] } }
@@ -111,13 +149,15 @@ module "dlq_notifier" {
   source              = "git::https://github.com/wso2/azure-terraform-modules.git//modules/azurerm/Logic-App-Workflow?ref=v2.41.2"
   name                = "${var.name}-dlq-notifier"
   location            = var.location
-  resource_group_name = module.resource_group.resource_group_name
+  resource_group_name = data.azurerm_resource_group.this.name
   identity_type       = "SystemAssigned"
 }
 
 data "azurerm_logic_app_workflow" "dlq_notifier" {
   name                = module.dlq_notifier.name
-  resource_group_name = module.resource_group.resource_group_name
+  resource_group_name = data.azurerm_resource_group.this.name
+  # Waits for the workflow, so the first apply reads it after creating it instead of failing at plan.
+  depends_on = [module.dlq_notifier]
 }
 
 resource "azurerm_logic_app_trigger_recurrence" "dlq_notifier" {
@@ -173,13 +213,15 @@ module "monitor_notifier" {
   source              = "git::https://github.com/wso2/azure-terraform-modules.git//modules/azurerm/Logic-App-Workflow?ref=v2.41.2"
   name                = "${var.name}-monitor-notifier"
   location            = var.location
-  resource_group_name = module.resource_group.resource_group_name
+  resource_group_name = data.azurerm_resource_group.this.name
   identity_type       = "SystemAssigned"
 }
 
 data "azurerm_logic_app_workflow" "monitor_notifier" {
   name                = module.monitor_notifier.name
-  resource_group_name = module.resource_group.resource_group_name
+  resource_group_name = data.azurerm_resource_group.this.name
+  # Waits for the workflow, so the first apply reads it after creating it instead of failing at plan.
+  depends_on = [module.monitor_notifier]
 }
 
 module "monitor_notifier_trigger" {

@@ -1,12 +1,14 @@
 <policies>
   <inbound>
     <base />
+%{ if length(address_ranges) > 0 ~}
     <!-- Only Cloudflare may reach the gateway; everything else gets 403. -->
     <ip-filter action="allow">
 %{ for r in address_ranges ~}
       <address-range from="${r.from}" to="${r.to}" />
 %{ endfor ~}
     </ip-filter>
+%{ endif ~}
   </inbound>
   <backend>
     <base />

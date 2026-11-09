@@ -15,10 +15,19 @@
 # under the License.
 
 locals {
-  wso2_modules = "git::https://github.com/wso2/azure-terraform-modules.git//modules"
-
   # Same path as the current ingestion service, so sources only change host and credential.
   api_path = "api/wso2/v1/sre_alert_api"
+
+  # C# that lists the service names in a parsed source body (`body`); sources not listed carry a top-level service field.
+  service_candidates = {
+    azure      = "new[] { (string)body.SelectToken(\"data.customProperties.service\") }"
+    gcp        = "new[] { (string)body.SelectToken(\"incident.policy_user_labels.service\") }"
+    icinga     = "new[] { (string)body.SelectToken(\"vars.service\") }"
+    aws        = "new[] { (string)JToken.Parse((string)JToken.Parse((string)body[\"Message\"])[\"AlarmDescription\"])[\"service\"] }"
+    prometheus = "body.SelectTokens(\"alerts[*].labels.service\").Select(t => (string)t).ToArray()"
+    site24x7   = "body.SelectTokens(\"TAGS[*]\").Select(t => (string)t).Where(t => t != null && t.StartsWith(\"Service:\", StringComparison.OrdinalIgnoreCase)).Select(t => t.Substring(8).Trim()).ToArray()"
+  }
+  default_service_candidates = "new[] { (string)body.SelectToken(\"service\") }"
 
   queues = {
     high   = "alerts-high"
@@ -26,13 +35,19 @@ locals {
   }
 
   # Holds dead-lettered messages after the notifier has posted them, for evidence and manual replay.
-  dead_letter_archive_queue = "alerts-dead-letter-archive"
+  dead_letter_archive_queue = "alerts-dead-letter"
 
   servicebus_premium = var.servicebus_sku == "Premium"
+  servicebus_basic   = var.servicebus_sku == "Basic"
 
-  # Premium queues accept up to 1 MiB and Standard queues 256 KiB; some headroom is left for
-  # broker and custom properties inside the tier's message limit.
-  max_body_bytes = local.servicebus_premium ? 983040 : 245760
+  # Basic caps message time to live at 14 days.
+  dead_letter_archive_days = local.servicebus_basic ? 14 : 30
+
+  # Basic and Standard have a fixed 256 KiB message limit and reject the setting, so it is left unset there.
+  servicebus_max_message_kilobytes = local.servicebus_premium ? 1024 : null
+
+  # Leaves room for broker and custom properties: 960 KiB of the 1 MiB Premium limit, 192 KiB of the 256 KiB Basic and Standard limit.
+  max_body_bytes = local.servicebus_premium ? 983040 : 196608
 
   # Set by an operator outside Terraform so the webhook URL never lands in state.
   chat_webhook_secret_name = "chat-webhook-sre-alerts"

@@ -40,14 +40,22 @@ variable "tags" {
 }
 
 variable "sources" {
-  description = "Monitoring sources the gateway accepts, keyed by route name, each with the queue tier it is sent to (decision D1)"
-  type = map(object({
-    tier = string
-  }))
+  description = "Monitoring sources the gateway accepts, one route and credential each"
+  type        = set(string)
 
   validation {
-    condition     = alltrue([for k, v in var.sources : can(regex("^[a-z0-9]+$", k)) && contains(["high", "normal"], v.tier)])
-    error_message = "source keys must be lowercase alphanumeric and tier must be high or normal."
+    condition     = alltrue([for s in var.sources : can(regex("^[a-z0-9]+$", s))])
+    error_message = "sources must be lowercase alphanumeric."
+  }
+}
+
+variable "high_tier_services" {
+  description = "Services whose alerts go to alerts-high, matched against the service field of the alert body (decision D1); every other alert goes to alerts-normal"
+  type        = set(string)
+
+  validation {
+    condition     = alltrue([for s in var.high_tier_services : can(regex("^[A-Za-z0-9._-]{1,128}$", s))])
+    error_message = "high_tier_services entries must be 1 to 128 letters, digits, dots, underscores or hyphens."
   }
 }
 
@@ -71,30 +79,39 @@ variable "apim_publisher_email" {
   type        = string
 }
 
+variable "servicebus_sku" {
+  description = "Service Bus tier: Basic (cheapest dev: no IP firewall, no duplicate detection, 14 day TTL), Standard (256 KiB messages, gateway allowed by IP) or Premium (1 MiB messages, gateway allowed as a trusted service)"
+  type        = string
+
+  validation {
+    condition     = contains(["Basic", "Standard", "Premium"], var.servicebus_sku)
+    error_message = "servicebus_sku must be Basic, Standard or Premium."
+  }
+}
+
 variable "servicebus_capacity" {
-  description = "Service Bus Premium messaging units; unused on the Standard tier"
+  description = "Service Bus Premium messaging units; ignored for Basic and Standard"
   type        = number
 }
 
-variable "servicebus_sku" {
-  description = "Service Bus tier: Premium for production (trusted-services bypass, 1 MiB messages), Standard for the cheapest dev stack"
-  type        = string
-  default     = "Premium"
-
-  validation {
-    condition     = contains(["Premium", "Standard"], var.servicebus_sku)
-    error_message = "servicebus_sku must be Premium or Standard."
-  }
-}
-
 variable "cloudflare_ip_ranges" {
-  description = "Cloudflare IPv4 CIDR ranges (https://www.cloudflare.com/ips-v4); the only callers the gateway accepts"
+  description = "Cloudflare IPv4 CIDR ranges (https://www.cloudflare.com/ips-v4); the only callers the gateway accepts. Empty leaves the gateway public (dev only)"
   type        = list(string)
 
   validation {
-    condition     = length(var.cloudflare_ip_ranges) > 0 && alltrue([for c in var.cloudflare_ip_ranges : can(cidrhost(c, 0))])
-    error_message = "cloudflare_ip_ranges must be a non-empty list of IPv4 CIDR ranges."
+    condition     = alltrue([for c in var.cloudflare_ip_ranges : can(cidrhost(c, 0))])
+    error_message = "cloudflare_ip_ranges must be a list of IPv4 CIDR ranges."
   }
+}
+
+variable "shared_credential" {
+  description = "Dev only: one username and password for every source instead of the generated per-source credentials; null keeps per-source credentials"
+  type = object({
+    username = string
+    password = string
+  })
+  default   = null
+  sensitive = true
 }
 
 variable "consumer_principal_ids" {

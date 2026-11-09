@@ -65,6 +65,12 @@ variable "public_network_access_enabled" {
   default     = true
 }
 
+variable "network_rules_enabled" {
+  description = "Whether to apply the network rule set; Basic has no IP firewall, so it must be false there"
+  type        = bool
+  default     = true
+}
+
 variable "network_default_action" {
   description = "Action for traffic that matches no network rule: Allow or Deny"
   type        = string

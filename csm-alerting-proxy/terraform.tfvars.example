@@ -1,40 +1,43 @@
 subscription_id = "00000000-0000-0000-0000-000000000000"
 location        = "eastus2"
-name            = "csm-alerting-prod"
+name            = "csm-alerting-dev"
 
 tags = {
   product     = "csm"
   component   = "alerting-proxy"
-  environment = "prod"
+  environment = "dev"
 }
 
-# Decision D1: tier per source route. Trigger and resolve of a source always share a queue.
-sources = {
-  aws           = { tier = "high" }
-  azure         = { tier = "high" }
-  gcp           = { tier = "high" }
-  site24x7      = { tier = "high" }
-  datadog       = { tier = "normal" }
-  prometheus    = { tier = "normal" }
-  icinga        = { tier = "normal" }
-  elasticsearch = { tier = "normal" }
-  opensearch    = { tier = "normal" }
-  openobserve   = { tier = "normal" }
-}
+# One route and credential per monitoring tool.
+sources = [
+  "aws", "azure", "gcp", "site24x7", "datadog",
+  "prometheus", "icinga", "elasticsearch", "opensearch", "openobserve",
+  "servicenow",
+]
 
-# Decision D12: Premium is the tier with zone redundancy; Developer_1 is enough for a non-production stack.
-apim_sku_name        = "Premium_2"
-apim_zones           = ["1", "2"]
+# Decision D1: alerts whose body has "service" set to one of these go to alerts-high; everything else goes to alerts-normal.
+high_tier_services = [
+  "client-prod-alert-integration",
+]
+
+# Decision D12: cheapest dev setup. Developer_1 has no SLA and no zones; production uses Premium_2 with apim_zones = ["1", "2"].
+apim_sku_name        = "Developer_1"
+apim_zones           = []
 apim_publisher_name  = "WSO2 SRE"
 apim_publisher_email = "sre@example.com"
 
+# Basic for dev (no IP firewall, no duplicate detection, 14 day archive); production uses Premium with servicebus_capacity = 1.
+servicebus_sku      = "Basic"
 servicebus_capacity = 1
 
-# Copy from https://www.cloudflare.com/ips-v4 at apply time.
-cloudflare_ip_ranges = [
-  "173.245.48.0/20",
-  "103.21.244.0/22",
-]
+# Dev: empty leaves the gateway public. Production copies https://www.cloudflare.com/ips-v4 at apply time.
+cloudflare_ip_ranges = []
+
+# Dev: every source logs in as test/test. Remove for production to get a generated password per source.
+shared_credential = {
+  username = "test"
+  password = "test"
+}
 
 # Object ID of the identity CSM Alert Core authenticates as.
 consumer_principal_ids = ["00000000-0000-0000-0000-000000000000"]

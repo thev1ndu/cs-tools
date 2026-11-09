@@ -1,13 +1,13 @@
 <policies>
   <inbound>
     <base />
-    <!-- Accepts Basic, or the current ingestion's Bearer base64(user:secret); the username must be the source name. GCP only sends credentials after the WWW-Authenticate challenge. -->
+    <!-- Accepts Basic, or the current ingestion's Bearer base64(user:secret); the username is the source name unless a shared dev credential is set. GCP only sends credentials after the WWW-Authenticate challenge. -->
     <choose>
       <when condition="@{
           string header = context.Request.Headers.GetValueOrDefault(&quot;Authorization&quot;, &quot;&quot;);
           if (header.ToLowerInvariant().StartsWith(&quot;bearer &quot;)) { header = &quot;Basic &quot; + header.Substring(7).Trim(); }
           BasicAuthCredentials credentials = header.AsBasic();
-          return credentials == null || credentials.UserId != &quot;${source}&quot; || credentials.Password != &quot;{{${named_value}}}&quot;;
+          return credentials == null || credentials.UserId != &quot;${username}&quot; || credentials.Password != &quot;{{${named_value}}}&quot;;
         }">
         <return-response>
           <set-status code="401" reason="Unauthorized" />
@@ -33,10 +33,21 @@
         </return-response>
       </when>
     </choose>
+    <!-- The tier comes from the service named in the body, read where this source puts it; a high-tier service wins when there are several, and an unlisted, missing or unreadable service goes to the normal queue. -->
+    <set-variable name="service" value="@{
+        string[] candidates;
+        try {
+          JToken body = JToken.Parse((string)context.Variables[&quot;payload&quot;]);
+          candidates = ${service_candidates};
+        } catch { candidates = new string[0]; }
+        string[] valid = candidates.Where(s =&gt; s != null &amp;&amp; Regex.IsMatch(s, &quot;^[A-Za-z0-9._-]{1,128}$&quot;)).ToArray();
+        return valid.FirstOrDefault(s =&gt; &quot;,${high_services},&quot;.Contains(&quot;,&quot; + s + &quot;,&quot;)) ?? valid.FirstOrDefault() ?? &quot;unknown&quot;;
+      }" />
+    <set-variable name="tier" value="@(&quot;,${high_services},&quot;.Contains(&quot;,&quot; + (string)context.Variables[&quot;service&quot;] + &quot;,&quot;) ? &quot;high&quot; : &quot;normal&quot;)" />
     <!-- The body goes to the queue unchanged; the envelope travels as message properties. MessageId is the gateway request id, so a retried send is dropped by duplicate detection. -->
     <retry condition="@(!context.Variables.ContainsKey(&quot;queueResponse&quot;) || context.Variables[&quot;queueResponse&quot;] == null || ((IResponse)context.Variables[&quot;queueResponse&quot;]).StatusCode &gt;= 500)" count="2" interval="1" first-fast-retry="true">
       <send-request mode="new" response-variable-name="queueResponse" timeout="10" ignore-error="true">
-        <set-url>${queue_url}</set-url>
+        <set-url>@((string)context.Variables["tier"] == "high" ? "${queue_urls.high}" : "${queue_urls.normal}")</set-url>
         <set-method>POST</set-method>
         <set-header name="Content-Type" exists-action="override">
           <value>@(context.Request.Headers.GetValueOrDefault("Content-Type", "application/octet-stream"))</value>
@@ -47,8 +58,11 @@
         <set-header name="source" exists-action="override">
           <value>"${source}"</value>
         </set-header>
+        <set-header name="service" exists-action="override">
+          <value>@("\"" + (string)context.Variables["service"] + "\"")</value>
+        </set-header>
         <set-header name="tier" exists-action="override">
-          <value>"${tier}"</value>
+          <value>@("\"" + (string)context.Variables["tier"] + "\"")</value>
         </set-header>
         <set-header name="received_at" exists-action="override">
           <value>@("\"" + DateTime.UtcNow.ToString("o") + "\"")</value>

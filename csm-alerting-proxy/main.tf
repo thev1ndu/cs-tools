@@ -16,18 +16,16 @@
 
 data "azurerm_client_config" "current" {}
 
-module "resource_group" {
-  source              = "git::https://github.com/wso2/azure-terraform-modules.git//modules/azurerm/Resource-Group?ref=v2.41.2"
-  resource_group_name = var.name
-  location            = var.location
-  tags                = var.tags
+# The resource group is created outside this stack and shares the stack's name.
+data "azurerm_resource_group" "this" {
+  name = var.name
 }
 
 module "log_analytics_workspace" {
   source                       = "git::https://github.com/wso2/azure-terraform-modules.git//modules/azurerm/Log-Analytics-Workspace?ref=v2.41.2"
   log_analytics_workspace_name = var.name
   location                     = var.location
-  resource_group_name          = module.resource_group.resource_group_name
+  resource_group_name          = data.azurerm_resource_group.this.name
   log_analytics_workspace_sku  = "PerGB2018"
   log_retention_in_days        = 30
   tags                         = var.tags
@@ -37,7 +35,7 @@ module "key_vault" {
   source                          = "git::https://github.com/wso2/azure-terraform-modules.git//modules/azurerm/Key-Vault?ref=v2.41.2"
   key_vault_name                  = var.name
   location                        = var.location
-  resource_group_name             = module.resource_group.resource_group_name
+  resource_group_name             = data.azurerm_resource_group.this.name
   sku_name                        = "standard"
   vault_access_tenant_id          = data.azurerm_client_config.current.tenant_id
   enable_vault_rbac_authorization = true

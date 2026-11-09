@@ -6,3 +6,11 @@ crash.log
 terraform.tfvars
 *.auto.tfvars
 backend.hcl
+backend_override.tf
+
+# macOS / editor junk
+.DS_Store
+*.localized
+._*
+.Spotlight-V100
+.Trashes

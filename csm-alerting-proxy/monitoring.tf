@@ -33,7 +33,7 @@ module "platform_action_group" {
   source                    = "git::https://github.com/wso2/azure-terraform-modules.git//modules/azurerm/Monitor-Action-Groups?ref=v2.41.2"
   montior_action_group_name = "${var.name}-platform"
   short_name                = "csmalerting"
-  resource_group_name       = module.resource_group.resource_group_name
+  resource_group_name       = data.azurerm_resource_group.this.name
   email_receivers = [for r in var.alert_email_receivers : {
     name                    = r.name
     email_address           = r.email_address
@@ -51,7 +51,7 @@ module "platform_action_group" {
 
 module "platform_metric_alerts" {
   source              = "git::https://github.com/wso2/azure-terraform-modules.git//modules/azurerm/Monitor-Metric-Alerts?ref=v2.41.2"
-  resource_group_name = module.resource_group.resource_group_name
+  resource_group_name = data.azurerm_resource_group.this.name
   location            = var.location
   tags                = var.tags
 

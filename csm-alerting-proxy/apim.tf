@@ -18,7 +18,7 @@ module "api_management" {
   source              = "./modules/API-Management"
   api_management_name = var.name
   location            = var.location
-  resource_group_name = module.resource_group.resource_group_name
+  resource_group_name = data.azurerm_resource_group.this.name
   sku_name            = var.apim_sku_name
   zones               = var.apim_zones
   publisher_name      = var.apim_publisher_name
@@ -38,7 +38,7 @@ module "apim_key_vault_secrets_user" {
 resource "azurerm_api_management_api" "sre_alert" {
   name                  = "sre-alert-api"
   api_management_name   = module.api_management.name
-  resource_group_name   = module.resource_group.resource_group_name
+  resource_group_name   = data.azurerm_resource_group.this.name
   revision              = "1"
   display_name          = "SRE Alert API"
   path                  = local.api_path
@@ -49,7 +49,7 @@ resource "azurerm_api_management_api" "sre_alert" {
 resource "azurerm_api_management_api_policy" "sre_alert" {
   api_name            = azurerm_api_management_api.sre_alert.name
   api_management_name = module.api_management.name
-  resource_group_name = module.resource_group.resource_group_name
+  resource_group_name = data.azurerm_resource_group.this.name
   xml_content = templatefile("${path.module}/policies/api.xml.tftpl", {
     address_ranges = local.cloudflare_address_ranges
   })
@@ -63,27 +63,17 @@ module "source_credential" {
   min_special                = 0
 }
 
-# Both halves of the provisioning credential live in the vault: the username secret holds the
-# source name and the password secret holds the generated password the named value points at.
+# The username is the source name; the secret holds only the password.
 module "source_credential_secret" {
   source       = "git::https://github.com/wso2/azure-terraform-modules.git//modules/azurerm/Key-Vault-Secret?ref=v2.41.2"
   key_vault_id = module.key_vault.vault_id
-  secrets_map = merge(
-    {
-      for s in keys(var.sources) : "password-${s}" => {
-        name            = "alerts-source-${s}"
-        value           = module.source_credential[s].random_password
-        expiration_date = null
-      }
-    },
-    {
-      for s in keys(var.sources) : "username-${s}" => {
-        name            = "alerts-source-${s}-username"
-        value           = s
-        expiration_date = null
-      }
-    },
-  )
+  secrets_map = {
+    for s in var.sources : s => {
+      name            = "alerts-source-${s}"
+      value           = var.shared_credential == null ? module.source_credential[s].random_password : var.shared_credential.password
+      expiration_date = null
+    }
+  }
   depends_on = [module.operator_key_vault_secrets_officer]
 }
 
@@ -91,7 +81,7 @@ resource "azurerm_api_management_named_value" "source_credential" {
   for_each            = var.sources
   name                = "alerts-source-${each.key}"
   api_management_name = module.api_management.name
-  resource_group_name = module.resource_group.resource_group_name
+  resource_group_name = data.azurerm_resource_group.this.name
   display_name        = "alerts-source-${each.key}"
   secret              = true
 
@@ -108,18 +98,21 @@ module "ingest_operation" {
   api_operation_id    = "ingest-${each.key}"
   api_name            = azurerm_api_management_api.sre_alert.name
   api_management_name = module.api_management.name
-  resource_group_name = module.resource_group.resource_group_name
+  resource_group_name = data.azurerm_resource_group.this.name
   display_name        = "Ingest ${each.key} alert"
   method              = "POST"
   url_template        = "/${each.key}"
 
   policy_xml_template_file_path = "${path.module}/policies/ingest-operation.xml.tftpl"
   policy_xml_template_vars = {
-    source         = each.key
-    tier           = each.value.tier
-    queue_url      = "${module.servicebus_namespace.endpoint}/${module.servicebus_queue[each.value.tier].name}/messages"
-    named_value    = azurerm_api_management_named_value.source_credential[each.key].name
-    max_body_bytes = local.max_body_bytes
+    source        = each.key
+    username      = var.shared_credential == null ? each.key : var.shared_credential.username
+    high_services = join(",", sort(var.high_tier_services))
+    # The C# sits in an XML attribute, so it is escaped here rather than written escaped in locals.
+    service_candidates = replace(replace(replace(replace(lookup(local.service_candidates, each.key, local.default_service_candidates), "&", "&amp;"), "\"", "&quot;"), "<", "&lt;"), ">", "&gt;")
+    queue_urls         = { for tier, queue in module.servicebus_queue : tier => "${module.servicebus_namespace.endpoint}/${queue.name}/messages" }
+    named_value        = azurerm_api_management_named_value.source_credential[each.key].name
+    max_body_bytes     = local.max_body_bytes
   }
 }
 

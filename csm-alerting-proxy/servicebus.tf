@@ -15,16 +15,23 @@
 # under the License.
 
 module "servicebus_namespace" {
-  source                    = "./modules/Service-Bus-Namespace"
-  servicebus_namespace_name = var.name
-  location                  = var.location
-  resource_group_name       = module.resource_group.resource_group_name
-  sku                       = var.servicebus_sku
-  capacity                  = var.servicebus_capacity
-  # On Premium, API Management reaches the namespace as a trusted service, so it needs no IP rule.
-  # On Standard there is no trusted-services bypass, so the gateway IPs are allowed explicitly instead.
-  network_ip_rules = distinct(concat(var.consumer_ip_ranges, var.operator_ip_ranges, local.logic_app_outbound_ips, local.servicebus_premium ? [] : module.api_management.public_ip_addresses))
-  tags             = var.tags
+  source                       = "./modules/Service-Bus-Namespace"
+  servicebus_namespace_name    = var.name
+  location                     = var.location
+  resource_group_name          = data.azurerm_resource_group.this.name
+  sku                          = var.servicebus_sku
+  capacity                     = local.servicebus_premium ? var.servicebus_capacity : 0
+  premium_messaging_partitions = local.servicebus_premium ? 1 : 0
+  # Basic has no IP firewall, so the namespace relies on Entra ID alone; Premium lets API Management in as a trusted service; Standard allows the gateway IPs instead.
+  network_rules_enabled            = !local.servicebus_basic
+  network_trusted_services_allowed = local.servicebus_premium
+  network_ip_rules = distinct(concat(
+    var.consumer_ip_ranges,
+    var.operator_ip_ranges,
+    local.logic_app_outbound_ips,
+    local.servicebus_premium ? [] : module.api_management.public_ip_addresses,
+  ))
+  tags = var.tags
 }
 
 module "servicebus_queue" {
@@ -32,17 +39,19 @@ module "servicebus_queue" {
   source                        = "./modules/Service-Bus-Queue"
   queue_name                    = each.value
   namespace_id                  = module.servicebus_namespace.id
-  max_message_size_in_kilobytes = local.servicebus_premium ? 1024 : null # Large messages are a Premium feature.
+  max_message_size_in_kilobytes = local.servicebus_max_message_kilobytes
+  # Basic has no duplicate detection.
+  requires_duplicate_detection = !local.servicebus_basic
 }
 
 module "dead_letter_archive_queue" {
   source                               = "./modules/Service-Bus-Queue"
   queue_name                           = local.dead_letter_archive_queue
   namespace_id                         = module.servicebus_namespace.id
-  max_message_size_in_kilobytes        = local.servicebus_premium ? 1024 : null # Large messages are a Premium feature.
-  default_message_ttl                  = "P30D"
+  default_message_ttl                  = "P${local.dead_letter_archive_days}D"
   dead_lettering_on_message_expiration = false
   requires_duplicate_detection         = false
+  max_message_size_in_kilobytes        = local.servicebus_max_message_kilobytes
 }
 
 module "apim_queue_sender" {
@@ -76,6 +85,10 @@ module "servicebus_diagnostics" {
     eventhub_authorization_rule_id = ""
     eventhub_name                  = ""
   }
-  required_log_categories = [{ category_name = "OperationalLogs" }, { category_name = "RuntimeAuditLogs" }]
-  all_metrics_enabled     = true
+  # Runtime audit logs exist only on Premium.
+  required_log_categories = concat(
+    [{ category_name = "OperationalLogs" }],
+    local.servicebus_premium ? [{ category_name = "RuntimeAuditLogs" }] : [],
+  )
+  all_metrics_enabled = true
 }
