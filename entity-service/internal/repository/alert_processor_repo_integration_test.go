@@ -38,10 +38,10 @@ func storeAlerts(t *testing.T, repo AlertRepository, n int, change func(i int, r
 		t.Fatal(err)
 	}
 	for i, id := range ids {
-		row := integrationAlert(id, "it-alert-proc-"+id, 0)
+		row := integrationAlert(id, "it-alert-proc-"+id)
 		row.RawBody = []byte("{}")
 		change(i, &row)
-		if _, _, err := repo.InsertAlerts(ctx, []domain.NewAlert{row}); err != nil {
+		if _, err := repo.InsertAlerts(ctx, []domain.NewAlert{row}); err != nil {
 			t.Fatalf("InsertAlerts %s: %v", id, err)
 		}
 	}
@@ -62,7 +62,7 @@ func TestAlertGroupsIntegration_ReadsTheGroupFromAlerts(t *testing.T) {
 	}
 	seen := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
 	// One fingerprint: the same five fields on every alert.
-	key := model.Alert{Source: "it", Service: "it-group-" + time.Now().Format("150405.000000"), MetricName: "cpu", Environment: "prod", UniqueIdentifier: "it-group"}
+	key := model.Alert{Source: "it", Service: "it-alert-group-" + time.Now().Format("150405.000000"), MetricName: "cpu", Environment: "prod", UniqueIdentifier: "it-group"}
 	ids := storeAlerts(t, NewAlertRepository(NewScoped(pool)), 3, func(i int, row *domain.NewAlert) {
 		row.Alert, row.ReceivedOn = key, seen.Add(time.Duration(i)*time.Minute)
 	})

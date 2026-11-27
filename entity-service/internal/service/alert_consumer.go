@@ -49,8 +49,8 @@ type AlertQueue interface {
 // AlertStore is the storage the alert consumer writes to; repository.AlertRepository satisfies it.
 type AlertStore interface {
 	ReserveAlertIDs(ctx context.Context, n int) ([]string, error)
-	// InsertAlerts stores a message's rows and returns them as stored, with how many are new; a redelivered message returns the rows stored the first time.
-	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, int64, error)
+	// InsertAlerts stores a message's alerts and returns them as stored.
+	InsertAlerts(ctx context.Context, alerts []domain.NewAlert) ([]domain.NewAlert, error)
 }
 
 // AlertPublisher announces stored alerts to the alert processor; a message is acknowledged only after its alerts are published.
@@ -407,11 +407,10 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, queu
 		return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 	}
 
-	rows := c.buildRows(source, tier, queueName, message, alerts, ids)
+	rows := c.buildRows(tier, message, alerts, ids)
 	var stored []domain.NewAlert
-	var inserted int64
 	if err := c.withStoreRetry(ctx, func() (err error) {
-		stored, inserted, err = c.repo.InsertAlerts(ctx, rows)
+		stored, err = c.repo.InsertAlerts(ctx, rows)
 		return err
 	}); err != nil {
 		if isPermanentStoreError(err) {
@@ -420,14 +419,14 @@ func (c *AlertConsumer) process(ctx context.Context, tier domain.AlertTier, queu
 		slog.ErrorContext(ctx, "alert consumer: could not store alerts, the message will be redelivered", "messageId", message.ID, "err", err)
 		return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 	}
-	// Published after storing and before acknowledging: a failed publish leaves the message to be redelivered, and the redelivery publishes the rows stored the first time.
+	// Published after storing and before acknowledging: a failed publish leaves the message to be redelivered, which stores and publishes its alerts again; the processor folds the copies into the same incident.
 	if c.publisher != nil {
 		if err := c.withStoreRetry(ctx, func() error { return c.publisher.Publish(ctx, stored) }); err != nil {
 			slog.ErrorContext(ctx, "alert consumer: could not publish stored alerts, the message will be redelivered", "messageId", message.ID, "err", err)
 			return alertDecision{settlement: alertAbandon, alerts: len(alerts)}
 		}
 	}
-	return alertDecision{settlement: alertComplete, stored: inserted, alerts: len(alerts)}
+	return alertDecision{settlement: alertComplete, stored: int64(len(stored)), alerts: len(alerts)}
 }
 
 // reject dead-letters a message that can never be stored, with why; the dead-letter queue keeps its body for replay.
@@ -462,8 +461,7 @@ func safeTransform(transform alertsource.Transform, body []byte) (alerts []model
 }
 
 // buildRows gives each alert its ALT number the way alert-ingestion does: an alert with no identifier takes its own number.
-func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, queueName string, message *domain.AlertQueueMessage, alerts []model.Alert, ids []string) []domain.NewAlert {
-	messageKey := alertMessageKey(queueName, message.ID)
+func (c *AlertConsumer) buildRows(tier domain.AlertTier, message *domain.AlertQueueMessage, alerts []model.Alert, ids []string) []domain.NewAlert {
 	receivedOn := c.receivedOn(message)
 	rows := make([]domain.NewAlert, len(alerts))
 	for i, alert := range alerts {
@@ -471,33 +469,36 @@ func (c *AlertConsumer) buildRows(source string, tier domain.AlertTier, queueNam
 		if alert.UniqueIdentifier == "" {
 			alert.UniqueIdentifier = ids[i]
 		}
-		rows[i] = domain.NewAlert{
-			Number:       ids[i],
-			Route:        source,
-			Alert:        alert,
-			Tier:         tier,
-			MessageID:    messageKey,
-			MessageIndex: i,
-			ReceivedOn:   receivedOn,
-		}
+		rows[i] = domain.NewAlert{Number: ids[i], Alert: alert, Tier: tier, ReceivedOn: receivedOn}
 	}
-	// The message's body travels on its first row only, so a batch does not repeat it once per alert.
+	// The message's body travels on its first alert only, so a batch does not repeat it once per alert.
 	rows[0].RawBody = message.Body
 	return rows
 }
 
-// storableAlert cleans every field the way storableText does, so an alert with a NUL character is stored rather than refused.
-func storableAlert(a model.Alert) model.Alert {
-	for _, field := range []*string{&a.Service, &a.MetricName, &a.Severity, &a.Category, &a.Environment, &a.Source,
-		&a.UniqueIdentifier, &a.Description, &a.AssignmentGroup, &a.SourceTopic, &a.SourceAccount} {
-		*field = storableText(*field)
-	}
-	return a
+// alertFieldLengths are the alert table's VARCHAR lengths; a longer value is cut to fit rather than refused.
+var alertFieldLengths = []struct {
+	field  func(*model.Alert) *string
+	length int
+}{
+	{func(a *model.Alert) *string { return &a.Source }, 255},
+	{func(a *model.Alert) *string { return &a.Service }, 255},
+	{func(a *model.Alert) *string { return &a.MetricName }, 255},
+	{func(a *model.Alert) *string { return &a.Environment }, 100},
+	{func(a *model.Alert) *string { return &a.UniqueIdentifier }, 255},
+	{func(a *model.Alert) *string { return &a.Severity }, 50},
+	{func(a *model.Alert) *string { return &a.Category }, 100},
+	{func(a *model.Alert) *string { return &a.Description }, 4000},
+	{func(a *model.Alert) *string { return &a.AssignmentGroup }, 255},
 }
 
-// alertMessageKey is the stored message id: the queue's name and the message's own id, so a redelivery from one queue matches its earlier rows while the same id from another queue never collides with them.
-func alertMessageKey(queueName, messageID string) string {
-	return queueName + "/" + messageID
+// storableAlert cleans every stored field the way storableText does and cuts it to its column's length, so an alert with a NUL character or a long description is stored rather than refused.
+func storableAlert(a model.Alert) model.Alert {
+	for _, f := range alertFieldLengths {
+		v := f.field(&a)
+		*v = truncateRunes(storableText(*v), f.length)
+	}
+	return a
 }
 
 // receivedOn is when the gateway accepted the request, falling back to when the queue stored the message.
@@ -533,9 +534,6 @@ func (c *AlertConsumer) settle(ctx context.Context, queue AlertQueue, message *d
 	switch decision.settlement {
 	case alertComplete:
 		err = queue.Complete(settleCtx, message)
-		if err == nil && decision.stored < int64(decision.alerts) {
-			slog.InfoContext(ctx, "alert consumer: redelivered message was already stored", "messageId", message.ID, "queue", queue.Name(), "alerts", decision.alerts, "new", decision.stored)
-		}
 	case alertDeadLetter:
 		slog.WarnContext(ctx, "alert consumer: dead-lettering a message", "messageId", message.ID, "queue", queue.Name(), "reason", decision.reason)
 		err = queue.DeadLetter(settleCtx, message, decision.reason, truncateRunes(decision.description, maxDeadLetterDescription))
